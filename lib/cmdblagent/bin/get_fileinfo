@@ -1,0 +1,86 @@
+#!/usr/bin/perl
+#
+# 全ファイルの一覧を出力する。
+#
+
+use strict;
+use Cwd 'abs_path';
+
+$0 =~ m"^(.*)/";
+our $TOOLHOME = abs_path( ($1 // '.') . '/..');
+our $STATUSDIR = "$TOOLHOME/status";
+our $CONFDIR = "$TOOLHOME/conf";
+
+sub read_excludefiles () {
+	my @excluderegexps;
+	my %includedirs;
+	open my $h, "<", "$CONFDIR/fileinfo_excludefiles" or do {
+		die;
+	};
+	while( <$h> ){
+		chomp;
+		next if m"^\s*(#|$)";
+		if( m"^\+(.+)$" ){
+			$includedirs{$1} = 1;
+		}else{
+			push @excluderegexps, qr"$_";
+		}
+	}
+	close $h;
+	return \@excluderegexps, \%includedirs;
+}
+
+sub listup ($$$$);
+sub listup ($$$$) {
+	my ($o, $excluderegexps, $includedirs, $d) = @_;
+	$d =~ s{/$}{};
+	my $path = $d eq "" ? "/": $d;
+	opendir my $h, $path or return undef;
+	my @e;
+	while( my $e = readdir $h ){
+		# ファイル名でのチェック
+		next if $e eq ".";
+		next if $e eq "..";
+		push @e, $e;
+	}
+	close $h;
+	OUTSIDE:
+	foreach my $e ( sort @e ){
+		my $p = "$d/$e";
+		# パス名でのチェック
+		foreach my $excluderegexp ( @$excluderegexps ){
+			next OUTSIDE if $p =~ $excluderegexp;
+		}
+		my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
+		    $atime,$mtime,$ctime,$blksize,$blocks) = lstat $p;
+		next unless defined $dev;
+		my $printable = $p;
+		$printable =~ s{([\x01-\x20\$\x7e])}{"\$" . unpack("H2", $1);}eg;
+		if( $mode & 020000 ){
+			my $link = readlink $p;
+			$link =~ s{([\x01-\x20\$\x7e])}{"\$" . unpack("H2", $1);}eg;
+			printf $o "%o	%d:%d	%d	%d	%s	%s\n", $mode, $uid, $gid, $size, $mtime, $printable, $link;
+		}else{
+			printf $o "%o	%d:%d	%d	%d	%s\n", $mode, $uid, $gid, $size, $mtime, $printable;
+		}
+		if( $mode & 040000 ){
+			next if $$includedirs{$printable};
+			listup $o, $excluderegexps, $includedirs, $p;
+		}
+	}
+}
+
+my ($excluderegexps, $includedirs) = read_excludefiles;
+#our $DEV;
+#($DEV) = lstat $d;
+open my $h, ">", "$STATUSDIR/fileinfo.tsv" or do {
+	die;
+};
+listup $h, $excluderegexps, $includedirs, '/';
+foreach my $d ( sort keys %$includedirs ){
+	listup $h, $excluderegexps, $includedirs, $d;
+}
+close $h;
+
+
+

@@ -1,0 +1,135 @@
+#!/usr/bin/perl
+#
+# OS のパッケージ管理下のファイルの一覧を出力する。
+#
+
+use strict;
+use Cwd 'abs_path';
+use Fcntl ':mode';
+use Digest::MD5;
+
+$0 =~ m"^(.*)/";
+our $TOOLHOME = abs_path( ($1 // '.') . '/..');
+our $STATUSDIR = "$TOOLHOME/status";
+our $CONFDIR = "$TOOLHOME/conf";
+
+our $DPKG = "/usr/bin/dpkg";
+
+########
+
+sub encode_ctrlcode ($) {
+	$_[0] =~ s{ ([\x00-\x20\x7f\\]) }{ '\x' . uc(unpack('H2', $1)) }egx;
+	return $_[0];
+}
+
+sub decode_ctrlcode ($) {
+	$_[0] =~ s{ \\x([0-9a-f]{2}) }{ pack('H2', $1) }egx;
+	return $_[0];
+}
+
+########
+
+sub readfile_as_arrayref ($) {
+	my ($f) = @_;
+	my @r;
+	open my $h, '<', $f or do {
+		die "$f: cannot open, stopped";
+	};
+	while( <$h> ){
+		chomp;
+		push @r, $_;
+	}
+	close $h;
+	return [@r];
+}
+
+########
+
+unless( -x $DPKG ){
+	exit 0;
+}
+
+my %packages;
+my %package2systemmodules;
+my %package2systemsettings;
+
+my $d = "/var/lib/dpkg/info";
+opendir my $h, $d or do {
+	die "$d: cannot open, stopped";
+};
+while( my $e = readdir $h ){
+	next if $e eq ".";
+	next if $e eq "..";
+	if    ( $e =~ m"^(.+)\.list$" ){
+		$packages{$1} = 1;
+		$package2systemmodules{$1} = readfile_as_arrayref "$d/$e";
+	}elsif( $e =~ m"^(.+)\.conffiles$" ){
+		$packages{$1} = 1;
+		$package2systemsettings{$1} = readfile_as_arrayref "$d/$e";
+	}
+}
+close $h;
+
+my %alternatives;
+open my $h, '-|', "update-alternatives --get-selections" or do {
+	die "update-alternatives: cannot open, stopped";
+};
+while( <$h> ){
+	chomp;
+	my ($name, $choice, $path) = split m"\s+";
+	$alternatives{$path} = 1;
+}
+close $h;
+
+my %package2version;
+open my $h, '-|', "dpkg-query --show --showformat='\${Package} \${Version}\n'" or do {
+	die "dpkg-query: cannot open, stopped";
+};
+while( <$h> ){
+	chomp;
+	my ($package, $version) = split m"\s+";
+	$packages{$package} = 1;
+	$package2version{$package} = $version;
+}
+close $h;
+
+my $f = "$STATUSDIR/pkginfo_deb.tsv";
+open my $h, ">", $f or do {
+	die "$f: cannot open, stopped";
+};
+
+foreach my $package ( sort keys %packages ){
+	my $version        = $package2version{$package};
+	my $systemmodules  = $package2systemmodules{$package};
+	my $systemsettings = $package2systemsettings{$package};
+	print $h "deb:$package\n";
+	if( $version ){
+		print $h "\tVERSION	$version\n";
+	}
+	my %systemsettings;
+	if( $systemsettings ){
+		foreach my $i ( @$systemsettings ){
+			$systemsettings{$i} = 1;
+		}
+	}
+		
+	my %systemmodules;
+	if( $systemmodules ){
+		foreach my $i ( @$systemmodules ){
+			next if $systemsettings{$i};
+			$systemmodules{$i} = 1;
+		}
+	}
+
+	print $h "\tMODULES\n";
+	foreach my $i ( sort keys %systemmodules ){
+		print $h "		$i\n";
+	}
+	print $h "\tSETTINGS\n";
+	foreach my $i ( sort keys %systemsettings ){
+		print $h "		$i\n";
+	}
+}
+
+close $h;
+

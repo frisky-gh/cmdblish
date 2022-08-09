@@ -1,0 +1,146 @@
+#!/usr/bin/perl
+#
+# 全ファイルの一覧を出力する。
+#
+
+use strict;
+use Cwd 'abs_path';
+use Fcntl ':mode';
+use Digest::MD5;
+
+$0 =~ m"^(.*)/";
+our $TOOLHOME = abs_path( ($1 // '.') . '/..');
+our $STATUSDIR = "$TOOLHOME/status";
+our $CONFDIR = "$TOOLHOME/conf";
+
+our $MD5 = new Digest::MD5;
+
+########
+
+sub encode_ctrlcode ($) {
+	$_[0] =~ s{ ([\x00-\x20\x7f\\]) }{ '\x' . uc(unpack('H2', $1)) }egx;
+	return $_[0];
+}
+
+sub decode_ctrlcode ($) {
+	$_[0] =~ s{ \\x([0-9a-f]{2}) }{ pack('H2', $1) }egx;
+	return $_[0];
+}
+
+########
+sub read_settings () {
+	my @settings;
+	open my $h, "<", "$CONFDIR/settings" or do {
+		die;
+	};
+	while( <$h> ){
+		chomp;
+		next if m"^\s*$";
+		push @settings, $_;
+	}
+	close $h;
+	return [@settings];
+}
+
+sub read_settingcontents ($) {
+	my ($settings) = @_;
+	my %settingtypes;
+	my %settingcontents;
+	foreach my $path ( @$settings ){
+		my $realpath = $path;
+		$realpath =~ s{\$([0-9a-fA-F]{2})}{pack("H2", $1);}eg;
+
+		my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
+		    $atime,$mtime,$ctime,$blksize,$blocks) = lstat $realpath;
+
+		my $dst_mode    = sprintf "%o",    $mode;
+		my $dst_uid_gid = sprintf "%d:%d", $uid, $gid;
+		my $dst_size    = sprintf "%d",    $size;
+		my $dst_mtime   = sprintf "%d",    $mtime;
+
+		if    ( ! defined $mode ){
+			$settingtypes{$path} = 'NONE';
+			next;
+		}elsif( S_ISDIR($mode) ){
+			$settingtypes{$path} = 'DIR';
+			next;
+		}elsif( S_ISBLK($mode) || S_ISCHR($mode) ){
+			$settingtypes{$path} = 'DEVICE';
+			next;
+		}elsif( S_ISFIFO($mode) ){
+			$settingtypes{$path} = 'PIPE';
+			next;
+		}elsif( S_ISSOCK($mode) ){
+			$settingtypes{$path} = 'SOCKET';
+			next;
+		}elsif( S_ISLNK($mode) ){
+			$settingtypes{$path} = 'SYMLINK';
+			next;
+		}
+
+
+		open my $h, '<', $realpath or do {
+			die "$realpath: cannot open, stopped";
+		};
+		my @content = <$h>;
+		my $content = join '', @content;
+		close $h;
+
+		if( $size > 100000 ){
+			$settingtypes{$path} = 'LARGEFILE';
+			$MD5->reset;
+			$MD5->add( $content );
+			my $digest = $MD5->digest;
+			$digest =~ s{(.)}{ uc unpack('H2', $1) }egs;
+			$settingcontents{$path} = $digest;
+		}elsif( $content =~ m"[\x00-\x08\x0c\x0e-\x16\x18-\x1a\x1c-\x1f]" ){
+			$settingtypes{$path} = 'BINARYFILE';
+			$MD5->reset;
+			$MD5->add( $content );
+			my $digest = $MD5->digest;
+			$digest =~ s{(.)}{ uc unpack('H2', $1) }egs;
+			$settingcontents{$path} = $digest;
+		}else{
+			$settingtypes{$path} = 'FILE';
+			$settingcontents{$path} = \@content;
+		}
+	}
+	return \%settingtypes, \%settingcontents;
+}
+
+sub write_settingcontents ($$) {
+	my ($settingtypes, $settingcontents) = @_;
+	open my $h, ">", "$STATUSDIR/settingcontents.tsv" or do {
+		die;
+	};
+	foreach my $f ( sort keys %$settingtypes ){
+		my $type    = $$settingtypes{$f};
+		my $content = $$settingcontents{$f};
+		print $h "$f\n";
+		print $h "\tTYPE\t$type\n";
+		if    ( $type eq 'FILE' ){
+			print $h "\tCONTENT\n";
+			foreach my $i ( @$content ){
+				chomp $i;
+				print $h "\t\t$i\n";
+			}
+		}elsif( $type eq 'LARGEFILE' ){
+			print $h "\tCONTENT\n";
+			print $h "\t\t$content\n";
+		}elsif( $type eq 'BINARYFILE' ){
+			print $h "\tCONTENT\n";
+			print $h "\t\t$content\n";
+		}else{
+		}
+	}
+	close $h;
+}
+
+########
+
+my $settings        = read_settings;
+my ($types, $contents) = read_settingcontents $settings;
+write_settingcontents $types, $contents;
+
+
+

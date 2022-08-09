@@ -1,0 +1,75 @@
+#!/usr/bin/perl
+#
+# OS のパッケージ管理下のファイルの一覧を出力する。
+#
+
+use strict;
+use Cwd 'abs_path';
+use Fcntl ':mode';
+use Digest::MD5;
+
+$0 =~ m"^(.*)/";
+our $TOOLHOME = abs_path( ($1 // '.') . '/..');
+our $STATUSDIR = "$TOOLHOME/status";
+our $CONFDIR = "$TOOLHOME/conf";
+
+########
+
+sub encode_ctrlcode ($) {
+	$_[0] =~ s{ ([\x00-\x20\x7f\\]) }{ '\x' . uc(unpack('H2', $1)) }egx;
+	return $_[0];
+}
+
+sub decode_ctrlcode ($) {
+	$_[0] =~ s{ \\x([0-9a-f]{2}) }{ pack('H2', $1) }egx;
+	return $_[0];
+}
+
+########
+
+my %alternative;
+
+my @alternativesdir = ('/var/lib/alternatives', '/var/lib/dpkg/alternatives');
+foreach my $d ( @alternativesdir ){
+	next unless -d $d;
+	opendir my $h, $d or do {
+		die;
+	};
+	foreach my $e ( readdir $h ){
+		next if $e =~ m"^\.";
+		next unless -f "$d/$e";
+		open my $g, "$d/$e" or do {
+			die;
+		};
+		my $choice = <$g>;
+		my $path = <$g>;
+		chomp $path;
+		$alternative{$path} = $e;
+
+		while( <$g> ){
+			chomp;
+			last if $_ eq '';
+			$path = <$g>;
+			chomp $path;
+			$alternative{$path} = $g;
+		}
+		close $g;
+	}
+	closedir $h;
+}
+
+my $f = "$STATUSDIR/pkginfo_alternatives.tsv";
+open my $h, ">", $f or do {
+	die "$f: cannot open, stopped";
+};
+if( %alternative ){
+	print $h "os:alternatives\n";
+	print $h "\tVERSION\t0.0\n";
+	print $h "\tSETTINGS\n";
+	foreach my $path ( sort keys %alternative ){
+		print $h "\t\t$path\n";
+	}
+}
+close $h;
+
+

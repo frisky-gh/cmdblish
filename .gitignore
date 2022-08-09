@@ -1,0 +1,11 @@
+
+/status/*
+/work/*
+
+/conf/fileinfo_excludefiles
+/conf/hostoptions
+/conf/pkginfo_git_excluderepos
+/conf/pkginfo_userdefined_rules
+/conf/settings
+/conf/volatiles
+!.gitkeep

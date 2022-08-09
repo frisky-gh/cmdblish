@@ -1,0 +1,179 @@
+#!/usr/bin/perl
+
+use strict;
+use GDBM_File;
+use Cwd 'abs_path';
+use IPC::Open2;
+
+our ($TOOLHOME, $STATUSDIR, $LIBDIR, $CONFDIR, $WORKDIR, $STATUSDIR, $BASEINFODIR);
+BEGIN{
+	$0 =~ m"^(.*)/";
+	$TOOLHOME = abs_path( ($1 // '.') . '/..');
+	$STATUSDIR = "$TOOLHOME/status";
+	$LIBDIR = "$TOOLHOME/lib";
+	$CONFDIR = "$TOOLHOME/conf";
+	$WORKDIR = "$TOOLHOME/work";
+	$STATUSDIR = "$TOOLHOME/status";
+	$BASEINFODIR = "$TOOLHOME/baseinfos";
+
+	push @INC, "$LIBDIR/perl5";
+}
+
+use CMDBlish::Common;
+use CMDBlish::SubCommand;
+
+if( @ARGV < 1 ){
+	print "usage: % $0 SUBCOMMAND ...\n";
+	print "\n";
+	print "    SUBCOMMAND\n";
+	print "        get_fileinfo        HOSTNAME\@TIMEID\n";
+	print "        get_pkginfo_os      HOSTNAME\@TIMEID\n";
+	print "        get_pkginfo_git     HOSTNAME\@TIMEID\n";
+	print "        fix_pkginfo_os      HOSTNAME\@TIMEID\n";
+	print "        extract_pkginfo_userdefined HOSTNAME\@TIMEID\n";
+	print "        extract_volatiles   HOSTNAME\@TIMEID\n";
+	print "        extract_settings    HOSTNAME\@TIMEID\n";
+	print "        extract_unmanaged   HOSTNAME\@TIMEID\n";
+	print "        get_settingcontents HOSTNAME\@TIMEID\n";
+	print "        wrapup              HOSTNAME\@TIMEID\n";
+	print "        run         TIMEID HOSTNAME [HOSTNAME ...]\n";
+	print "        run_extract TIMEID HOSTNAME [HOSTNAME ...]\n";
+	exit 1;
+}
+
+########
+
+my ($subcmd, @args) = @ARGV;
+
+if    ( $subcmd eq 'get_fileinfo' ){
+	foreach my $snapshot ( @args ){
+		subcmd_get_fileinfo $snapshot;
+	}
+}elsif( $subcmd eq 'get_pkginfo_os' ){
+	foreach my $snapshot ( @args ){
+		subcmd_get_pkginfo_os $snapshot;
+	}
+}elsif( $subcmd eq 'get_pkginfo_git' ){
+	foreach my $snapshot ( @args ){
+		subcmd_get_pkginfo_git $snapshot;
+	}
+}elsif( $subcmd eq 'fix_pkginfo_os' ){
+	foreach my $snapshot ( @args ){
+		subcmd_fix_pkginfo_os $snapshot;
+	}
+}elsif( $subcmd eq 'extract_pkginfo_userdefined' ){
+	foreach my $snapshot ( @args ){
+		subcmd_extract_pkginfo_userdefined $snapshot;
+	}
+}elsif( $subcmd eq 'extract_volatiles' ){
+	foreach my $snapshot ( @args ){
+		subcmd_extract_volatiles $snapshot;
+	}
+}elsif( $subcmd eq 'extract_settings' ){
+	foreach my $snapshot ( @args ){
+		subcmd_extract_settings $snapshot;
+	}
+}elsif( $subcmd eq 'extract_unmanaged' ){
+	foreach my $snapshot ( @args ){
+		subcmd_extract_unmanaged $snapshot;
+	}
+}elsif( $subcmd eq 'get_settingcontents' ){
+	foreach my $snapshot ( @args ){
+		subcmd_get_settingcontents $snapshot;
+	}
+}elsif( $subcmd eq 'wrapup' ){
+	foreach my $snapshot ( @args ){
+		subcmd_wrapup $snapshot;
+	}
+}elsif( $subcmd eq 'run' ){
+	die unless @args >= 2;
+	$| = 1;
+	my $timeid = shift @args;
+	print "get_fileinfo";
+	foreach my $hostname ( @args ){
+		subcmd_get_fileinfo "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+	print "get_pkginfo_os";
+	foreach my $hostname ( @args ){
+		subcmd_get_pkginfo_os "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+	print "get_pkginfo_git";
+	foreach my $hostname ( @args ){
+		subcmd_get_pkginfo_git "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+	print "fix_pkginfo_os";
+	foreach my $hostname ( @args ){
+		subcmd_fix_pkginfo_os "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+	print "extract_pkginfo_userdefined";
+	foreach my $hostname ( @args ){
+		subcmd_extract_pkginfo_userdefined "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+	print "extract_volatiles";
+	foreach my $hostname ( @args ){
+		subcmd_extract_volatiles "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+	print "extract_settings";
+	foreach my $hostname ( @args ){
+		subcmd_extract_settings "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+	print "extract_unmanaged";
+	foreach my $hostname ( @args ){
+		subcmd_extract_unmanaged "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+	print "wrapup";
+	foreach my $hostname ( @args ){
+		subcmd_wrapup "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+
+}elsif( $subcmd eq 'run_extract' ){
+	die unless @args >= 2;
+	$| = 1;
+	my $timeid = shift @args;
+
+	print "fix_pkginfo_os";
+	foreach my $hostname ( @args ){
+		subcmd_fix_pkginfo_os "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+	print "extract_pkginfo_userdefined";
+	foreach my $hostname ( @args ){
+		subcmd_extract_pkginfo_userdefined "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+	print "extract_volatiles";
+	foreach my $hostname ( @args ){
+		subcmd_extract_volatiles "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+	print "extract_settings";
+	foreach my $hostname ( @args ){
+		subcmd_extract_settings "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+	print "extract_unmanaged";
+	foreach my $hostname ( @args ){
+		subcmd_extract_unmanaged "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+	print "wrapup";
+	foreach my $hostname ( @args ){
+		subcmd_wrapup "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+}else{
+	die;
+}
+
+exit 0;
+
+

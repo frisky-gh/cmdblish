@@ -1,0 +1,141 @@
+#!/usr/bin/perl
+#
+#
+
+use strict;
+use Cwd 'abs_path';
+
+$0 =~ m"^(.*)/";
+our $TOOLHOME = abs_path( ($1 // '.') . '/..');
+our $STATUSDIR = "$TOOLHOME/status";
+our $CONFDIR = "$TOOLHOME/conf";
+
+our $GIT = "/usr/bin/git";
+
+########
+
+sub encode_ctrlcode ($) {
+	$_[0] =~ s{ ([\x00-\x1f\x7e\\]) }{ '\x' . uc(unpack('H2', $1)) }egx;
+	return $_[0];
+}
+
+sub decode_ctrlcode ($) {
+	$_[0] =~ s{ \\x([0-9a-f]{2}) }{ pack('H2', $1) }egx;
+	return $_[0];
+}
+
+########
+
+sub getinfo_repos ($) {
+	my ($f) = @_;
+	my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
+	    $atime,$mtime,$ctime,$blksize,$blocks) = lstat $f;
+
+	my $g = encode_ctrlcode $f;
+	if( $mode & 020000 ){
+		my $link = encode_ctrlcode readlink $f;
+		return $mode, $uid, $gid, $size, $mtime, $g, $link;
+	}else{
+		return $mode, $uid, $gid, $size, $mtime, $g, undef;
+	}
+}
+
+########
+
+sub read_excluderepos () {
+	my @dirs;
+	open my $h, "<", "$CONFDIR/pkginfo_git_excluderepos" or do {
+		die;
+	};
+	while( <$h> ){
+		chomp;
+		next if m"^\s*$";
+		push @dirs, qr"$_";
+	}
+	close $h;
+	return [@dirs];
+}
+
+########
+
+unless( -x $GIT ){
+	exit 0;
+}
+
+my $excluderepos = read_excluderepos;
+my @repos;
+my $f = "$STATUSDIR/fileinfo.tsv";
+open my $h, "<", $f or do {
+	die "$f: cannot open, stopped";
+};
+OUTSIDE:
+while( <$h> ){
+	chomp;
+	my ($mode, $uid_gid, $size, $mtime, $path, $symlink) = split m"\s";
+	next unless $path =~ m"^(.*)/\.git$";
+	foreach my $re ( @$excluderepos ){
+		next OUTSIDE if $path =~ m"$re";
+	}
+	push @repos, [$1, $uid_gid];
+}
+close $h;
+
+my $f = "$STATUSDIR/pkginfo_git.tsv";
+open my $h, ">", $f or do {
+	die "$f: cannot open, stopped";
+};
+
+foreach my $r ( @repos ){
+	my ($path, $uid_gid) = @$r;
+	my $dir = $path . ( $path =~ m"/$" ? '' : '/' );
+	my $url = `cd \Q$path\E ; git config remote.origin.url`;
+	chomp $url;
+	my $package = $url eq '' ? $path : $url;
+
+	my $commitid_message = `cd \Q$path\E ; git log -n 1 --oneline`;
+	next unless $commitid_message =~ m"^(\S+) (.*)$";
+	my $commitid = $1;
+	my $commitmessage = $2;
+
+	my @vcmodules;
+	open my $i, '-|', "cd \Q$path\E ; git ls-tree -r --full-tree --name-status HEAD" or do {
+		die "git status: cannot open, stopped";
+	};
+	while( <$i> ){
+		chomp;
+		push @vcmodules, $_;
+	}
+	close $i;
+	my %modified;
+	open my $i, '-|', "cd \Q$path\E ; git status --porcelain" or do {
+		die "git status: cannot open, stopped";
+	};
+	while( <$i> ){
+		chomp;
+		unless( m"^(.)(.) (.+)$" ){
+			die;
+		}
+		next if $1 eq '?' && $2 eq '?';
+		$modified{$3} = 1;
+	}
+	close $i;
+
+	print $h "git:$package\n";
+	print $h "\tVERSION	$commitid\n";
+	print $h "\tOPTIONS\n";
+	print $h "\t\tGITPATH	$dir\n";
+	print $h "\t\tGITOWNER	$uid_gid\n";
+	print $h "\tMODULES\n";
+	foreach my $f ( @vcmodules ){
+		my $g = "$dir$f";
+		print $h "		$g\n";
+	}
+	print $h "\tMODIFIEDMODULES\n";
+	foreach my $f ( @vcmodules ){
+		next unless $modified{$f};
+		my $g = "$dir$f";
+		print $h "		$g\n";
+	}
+}
+close $h;
+

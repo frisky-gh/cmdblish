@@ -1,0 +1,132 @@
+#!/usr/bin/perl
+#
+# OS のパッケージ管理下のファイルの一覧を出力する。
+#
+
+use strict;
+use Cwd 'abs_path';
+use Fcntl ':mode';
+use Digest::MD5;
+
+$0 =~ m"^(.*)/";
+our $TOOLHOME = abs_path( ($1 // '.') . '/..');
+our $STATUSDIR = "$TOOLHOME/status";
+our $CONFDIR = "$TOOLHOME/conf";
+
+our $RPM = "/usr/bin/rpm";
+
+########
+
+sub encode_ctrlcode ($) {
+	$_[0] =~ s{ ([\x00-\x20\x7f\\]) }{ '\x' . uc(unpack('H2', $1)) }egx;
+	return $_[0];
+}
+
+sub decode_ctrlcode ($) {
+	$_[0] =~ s{ \\x([0-9a-f]{2}) }{ pack('H2', $1) }egx;
+	return $_[0];
+}
+
+########
+
+unless( -x $RPM ){
+	exit 0;
+}
+
+my %packages;
+my %package2systemmodules;
+
+open my $h, '-|', "rpm -qa --filesbypkg" or do {
+	die "rpm: cannot open, stopped";
+};
+while( <$h> ){
+	chomp;
+	my ($package, $file) = split m"\s+";
+	next if $file eq '';
+	$packages{$package} = 1;
+	push @{$package2systemmodules{$package}}, $file;
+}
+close $h;
+
+my %is_setting;
+open my $h, '-|', "rpm -qa --configfiles" or do {
+	die "rpm: cannot open, stopped";
+};
+while( <$h> ){
+	chomp;
+	next if $_ eq '';
+	$is_setting{$_} = 1;
+}
+close $h;
+
+my %alternatives;
+#open my $h, '-|', "update-alternatives --get-selections" or do {
+#	die "update-alternatives: cannot open, stopped";
+#};
+#while( <$h> ){
+#	chomp;
+#	my ($name, $choice, $path) = split m"\s+";
+#	$alternatives{$path} = 1;
+#}
+#close $h;
+
+my %package2info;
+my $lastpackage;
+my $lastkey;
+open my $h, '-|', "rpm -qa -i" or do {
+	die "dpkg-query: cannot open, stopped";
+};
+while( <$h> ){
+	chomp;
+	if( m"^(\w+(?:\s+\w+)*)\s*:\s*(\S.*)?$" ){
+		my $k = $1;
+		my $v = $2;
+		if( $k eq "Name" ){
+			$lastpackage = $v if $k eq "Name";
+			$packages{$lastpackage} = 1;
+		}
+		$package2info{$lastpackage}->{$k} = $v;
+	}else{
+		$package2info{$lastpackage}->{$lastkey} .= "\n" if
+			defined $package2info{$lastpackage}->{$lastkey};
+		$package2info{$lastpackage}->{$lastkey} .= $_;
+	}
+}
+close $h;
+
+my $f = "$STATUSDIR/pkginfo_rpm.tsv";
+open my $h, ">", $f or do {
+	die "$f: cannot open, stopped";
+};
+
+foreach my $package ( sort keys %packages ){
+	my $version       = $package2info{$package}->{Version} . '-' . $package2info{$package}->{Release};
+	my $systemmodules = $package2systemmodules{$package};
+	print $h "rpm:$package\n";
+	if( $version ne '-' ){
+		print $h "\tVERSION	$version\n";
+	}
+
+	my %systemmodules;
+	my %systemsettings;
+	foreach my $i ( @$systemmodules ){
+		if( $is_setting{$i} ){
+			$systemsettings{$i} = 1;
+		}else{
+			$systemmodules{$i} = 1;
+		}
+	}
+
+	print $h "\tMODULES\n";
+	foreach my $i ( sort keys %systemmodules ){
+		print $h "		$i\n";
+	}
+	print $h "\tSETTINGS\n";
+	foreach my $i ( sort keys %systemsettings ){
+		print $h "		$i\n";
+	}
+}
+
+close $h;
+
+
