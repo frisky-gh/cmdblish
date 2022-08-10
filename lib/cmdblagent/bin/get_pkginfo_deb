@@ -82,7 +82,7 @@ while( <$h> ){
 close $h;
 
 my %package2version;
-open my $h, '-|', "dpkg-query --show --showformat='\${Package} \${Version}\n'" or do {
+open my $h, '-|', "dpkg-query --show --showformat='\${binary:Package} \${Version}\n'" or do {
 	die "dpkg-query: cannot open, stopped";
 };
 while( <$h> ){

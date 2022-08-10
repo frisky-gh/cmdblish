@@ -65,7 +65,7 @@ open my $h, ">", $f or do {
 if( %alternative ){
 	print $h "os:alternatives\n";
 	print $h "\tVERSION\t0.0\n";
-	print $h "\tSETTINGS\n";
+	print $h "\tMODULES\n";
 	foreach my $path ( sort keys %alternative ){
 		print $h "\t\t$path\n";
 	}
