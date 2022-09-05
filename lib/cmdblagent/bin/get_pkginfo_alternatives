@@ -6,7 +6,6 @@
 use strict;
 use Cwd 'abs_path';
 use Fcntl ':mode';
-use Digest::MD5;
 
 $0 =~ m"^(.*)/";
 our $TOOLHOME = abs_path( ($1 // '.') . '/..');

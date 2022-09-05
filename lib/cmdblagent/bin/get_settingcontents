@@ -6,14 +6,28 @@
 use strict;
 use Cwd 'abs_path';
 use Fcntl ':mode';
-use Digest::MD5;
 
-$0 =~ m"^(.*)/";
-our $TOOLHOME = abs_path( ($1 // '.') . '/..');
+our $TOOLHOME;
+our $MD5;
+
+BEGIN {
+	$0 =~ m"^(.*)/";
+        $TOOLHOME = abs_path( ($1 // '.') . '/..');
+        push @INC, "$TOOLHOME/lib/perl5";
+
+	eval {
+		require Digest::MD5;
+		$MD5 = new Digest::MD5;
+	};
+	if ($@) {
+		require Digest::Perl::MD5;
+		$MD5 = new Digest::Perl::MD5;
+	}
+}
+
 our $STATUSDIR = "$TOOLHOME/status";
 our $CONFDIR = "$TOOLHOME/conf";
 
-our $MD5 = new Digest::MD5;
 
 ########
 
@@ -86,7 +100,10 @@ sub read_settingcontents ($) {
 		my $content = join '', @content;
 		close $h;
 
-		if( $size > 100000 ){
+		if    ( $size > 100000000 ){
+			$settingtypes{$path} = 'LARGEFILE';
+			$settingcontents{$path} = "-";
+		}elsif( $size > 100000 ){
 			$settingtypes{$path} = 'LARGEFILE';
 			$MD5->reset;
 			$MD5->add( $content );

@@ -129,6 +129,11 @@ if    ( $subcmd eq 'get_fileinfo' ){
 		subcmd_extract_unmanaged "$hostname\@$timeid"; print ".";
 	}
 	print "\n";
+	print "get_settingcontents";
+	foreach my $hostname ( @args ){
+		subcmd_get_settingcontents "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
 	print "wrapup";
 	foreach my $hostname ( @args ){
 		subcmd_wrapup "$hostname\@$timeid"; print ".";

@@ -118,7 +118,7 @@ sub _preparelocal ($$) {
 	mkdirordie  "$::WORKDIR/$host/status";
 	mkdirordie  "$::WORKDIR/$host/conf";
 	systemordie "chmod go-rwx $::WORKDIR/$host";
-	systemordie "rsync -aSx $::LIBDIR/cmdblagent/bin/ $::WORKDIR/$host/bin/";
+	systemordie "rsync -aSx $::LIBDIR/cmdblagent/ $::WORKDIR/$host/";
 }
 
 sub _prepareremote ($$) {
