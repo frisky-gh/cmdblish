@@ -42,8 +42,9 @@ while( <$h> ){
 	chomp;
 	my ($package, $file) = split m"\s+";
 	next if $file eq '';
+	my $file_encoded = encode_ctrlcode $file;
 	$packages{$package} = 1;
-	push @{$package2systemmodules{$package}}, $file;
+	push @{$package2systemmodules{$package}}, $file_encoded;
 }
 close $h;
 
@@ -54,7 +55,8 @@ open my $h, '-|', "rpm -qa --configfiles" or do {
 while( <$h> ){
 	chomp;
 	next if $_ eq '';
-	$is_setting{$_} = 1;
+	my $file_encoded = encode_ctrlcode $_;
+	$is_setting{$file_encoded} = 1;
 }
 close $h;
 

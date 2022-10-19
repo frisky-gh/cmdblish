@@ -5,12 +5,29 @@
 use strict;
 use Cwd 'abs_path';
 
-$0 =~ m"^(.*)/";
-our $TOOLHOME = abs_path( ($1 // '.') . '/..');
+our $TOOLHOME;
+our $MD5;
+
+BEGIN {
+	$0 =~ m"^(.*)/";
+	$TOOLHOME = abs_path( ($1 // '.') . '/..');
+	push @INC, "$TOOLHOME/lib/perl5";
+
+	eval {
+		require Digest::MD5;
+		$MD5 = new Digest::MD5;
+	};
+	if ($@) {
+		require Digest::Perl::MD5;
+		$MD5 = new Digest::Perl::MD5;
+	}
+}
+
 our $STATUSDIR = "$TOOLHOME/status";
 our $CONFDIR = "$TOOLHOME/conf";
 
 our $GIT = "/usr/bin/git";
+
 
 ########
 
@@ -41,6 +58,16 @@ sub getinfo_repos ($) {
 }
 
 ########
+
+sub read_file ($) {
+	my ($f) = @_;
+	open my $h, "<", $f or do {
+		die;
+	};
+	my $r = join '', <$h>;
+	close $h;
+	return $r;
+}
 
 sub read_excluderepos () {
 	my @dirs;
@@ -90,7 +117,8 @@ foreach my $r ( @repos ){
 	my $dir = $path . ( $path =~ m"/$" ? '' : '/' );
 	my $url = `cd \Q$path\E ; git config remote.origin.url`;
 	chomp $url;
-	my $package = $url eq '' ? $path : $url;
+	$url =~ s{^(https?://).*@(.*)$}{$1$2};
+	my $packagename = $url eq '' ? $path : $path . ":" . $url;
 
 	my $commitid_message = `cd \Q$path\E ; git log -n 1 --oneline`;
 	next unless $commitid_message =~ m"^(\S+) (.*)$";
@@ -120,11 +148,26 @@ foreach my $r ( @repos ){
 	}
 	close $i;
 
-	print $h "git:$package\n";
-	print $h "\tVERSION	$commitid\n";
+	$MD5->reset;
+	foreach my $f ( @vcmodules ){ $MD5->add( "$f\n" ); }
+	my $filenamehash = substr $MD5->digest, 0, 4;
+	$filenamehash =~ s{(.)}{ uc unpack('H2', $1) }egs;
+
+	$MD5->reset;
+	foreach my $f ( @vcmodules ){ $MD5->add( read_file "$path/$f" ); }
+	my $filecontenthash = substr $MD5->digest, 0, 4;
+	$filecontenthash =~ s{(.)}{ uc unpack('H2', $1) }egs;
+
+	my $version = $commitid;
+	$version .= "." . $filenamehash    if @vcmodules;
+	$version .= "." . $filecontenthash if @vcmodules;
+
+	print $h "git:$packagename\n";
+	print $h "\tVERSION	$version\n";
 	print $h "\tOPTIONS\n";
 	print $h "\t\tGITPATH	$dir\n";
 	print $h "\t\tGITOWNER	$uid_gid\n";
+	print $h "\t\tGITCOMMITID	$commitid\n";
 	print $h "\tMODULES\n";
 	foreach my $f ( @vcmodules ){
 		my $g = "$dir$f";

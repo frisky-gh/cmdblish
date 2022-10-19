@@ -8,4 +8,7 @@
 /conf/pkginfo_userdefined_rules
 /conf/settings
 /conf/volatiles
+/conf/.git
+/conf/.gitignore
+/conf/README.md
 !.gitkeep
