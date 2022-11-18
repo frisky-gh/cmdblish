@@ -61,8 +61,9 @@ sub getinfo_repos ($) {
 
 sub read_file ($) {
 	my ($f) = @_;
+	return "" unless -f $f;
 	open my $h, "<", $f or do {
-		die;
+		die "$f: cannot open, stopped";
 	};
 	my $r = join '', <$h>;
 	close $h;

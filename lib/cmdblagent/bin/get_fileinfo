@@ -23,7 +23,7 @@ sub read_excludefiles () {
 		if( m"^\+(.+)$" ){
 			$includedirs{$1} = 1;
 		}else{
-			push @excluderegexps, qr"$_";
+			push @excluderegexps, qr"^$_$";
 		}
 	}
 	close $h;
