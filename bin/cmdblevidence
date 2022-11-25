@@ -175,6 +175,11 @@ if    ( $subcmd eq 'get_fileinfo' ){
 		subcmd_wrapup "$hostname\@$timeid"; print ".";
 	}
 	print "\n";
+
+}elsif( $subcmd eq 'diff' ){
+	my ($old, $new) = @args;
+	subcmd_diff $old, $new;
+
 }else{
 	die;
 }

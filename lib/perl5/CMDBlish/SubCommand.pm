@@ -325,6 +325,61 @@ sub _generate_ospkg_diff ($$) {
 	return join "\t", @diff;
 }
 
+sub _load_settingcontents ($$$) {
+	my ($snapshot, $path2type, $path2content) = @_;
+
+	my $f = "$::STATUSDIR/$snapshot/settingcontents.tsv";
+
+	my $last_path;
+	my $last_attrname;
+
+	open my $h, "<", $f or do {
+		die "$f: cannot open, stopped";
+	};
+	while( <$h> ){
+		chomp;
+		my @v = split m"\t";
+		my ($path, $attrname, @value) = @v;
+		$last_path     = $path     if $path     ne "";
+		$last_attrname = $attrname if $attrname ne "";
+
+		next if @v < 3;
+		if    ( $last_attrname eq "TYPE" ){
+			$$path2type{$last_path} = $value[0];
+
+		}elsif( $last_attrname eq "CONTENT" ){
+			my $l = join "\t", @value;
+			push @{ $$path2content{$last_path} }, $l;
+
+		}else{
+			die "$last_attrname: illegal attribute, stopped";
+		}
+	}
+	close $h;
+}
+
+sub _diff_path ($$) {
+	my ($old, $new) = @_;
+	my %r;
+	while( my ($k, $v) = each %$old ){ $r{$k} += 1; }
+	while( my ($k, $v) = each %$new ){ $r{$k} += 2; }
+
+	my @remove;
+	my @add;
+	my @comm;
+	foreach my $k ( sort keys %r ){
+		my $v = $r{$k};
+		if   ( $v == 1 ){ push @remove, $k; }
+		elsif( $v == 2 ){ push @add,    $k; }
+		elsif( $v == 3 ){ push @comm,   $k; }
+		else{ die; }
+	}
+	return \@remove, \@add, \@comm;
+}
+
+sub _diff_content ($$) {
+}
+
 
 ########
 
@@ -812,6 +867,83 @@ sub subcmd_wrapup ($) {
 	close $h;
 }
 
+sub subcmd_diff ($$) {
+	my ($old_snapshot, $new_snapshot) = @_;
+
+	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
+	#my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
+
+	die unless snapshot_is_present $old_snapshot;
+	die unless snapshot_is_present $new_snapshot;
+
+	my $old_path2type = {};
+	my $old_path2content = {};
+	my $new_path2type = {};
+	my $new_path2content = {};
+	_load_settingcontents $old_snapshot, $old_path2type, $old_path2content;
+	_load_settingcontents $new_snapshot, $new_path2type, $new_path2content;
+
+	require Text::Diff;
+
+	my ($remove, $add, $comm) = _diff_path $old_path2type, $new_path2type;
+	my @modify;
+	foreach my $k ( @$comm ){
+		my $old_arrref = $$old_path2content{$k};
+		my $new_arrref = $$new_path2content{$k};
+		my $old_type;
+		my $new_type;
+		#my $old_type = $$old_type{$k};
+		#my $new_type = $$new_type{$k};
+
+		#unless( $old_type eq $new_type ){
+		#	push @modify, {
+		#		PATH => $k,
+		#		DIFF => [ "$old_type => $new_type\n" ]
+		#	};
+		#	next;
+		#}
+
+		if( $old_type eq "" ){
+			my ($old, $new) ;
+			$old = join "\n", @$old_arrref if defined $old_arrref;
+			$new = join "\n", @$new_arrref if defined $new_arrref;
+			next if $old eq $new;
+
+			my @output;
+			my $diff = Text::Diff::diff( \$old, \$new, {
+				STYLE => 'Unified',
+				FILENAME_A => "$old_snapshot:$k",
+				FILENAME_B => "$new_snapshot:$k",
+				CONTEXT => 3,
+				OUTPUT => \@output,
+			} );
+			push @modify, { PATH => $k, DIFF => \@output };
+		}
+	}
+
+		my %r;
+		foreach my $k ( @$remove ){ $r{$k} = { ACTION => "REMOVE" }; }
+		foreach my $k ( @$add )   { $r{$k} = { ACTION => "ADD" }; }
+		foreach my $k ( @modify ) {
+			$r{$$k{PATH}} = { ACTION => "MODIFY", DIFF => $$k{DIFF} };
+		}
+
+	foreach my $path ( sort keys %r ){
+		my $v = $r{$path};
+		my $action = $$v{ACTION};
+		my $diff   = $$v{DIFF};
+		print "$path\t$action\n";
+		if( $diff ){
+			my $text = join "", @$diff;
+			foreach my $i ( split "\n", $text ){
+				print "\t\t$i\n";
+			}
+		}
+	}
+
+	exit 0;
+}
+
 
 ########
 no strict;
@@ -826,9 +958,7 @@ sub import {
 *{caller . "::subcmd_extract_unmanaged"} = \&subcmd_extract_unmanaged;
 *{caller . "::subcmd_get_settingcontents"} = \&subcmd_get_settingcontents;
 *{caller . "::subcmd_wrapup"}            = \&subcmd_wrapup;
+*{caller . "::subcmd_diff"}              = \&subcmd_diff;
 }
 1;
-
-
-
 
