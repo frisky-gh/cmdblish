@@ -107,136 +107,6 @@ sub complete_trees ($$$) {
 
 ########
 
-sub _initremote ($$) {
-	my ($host, $opt) = @_;
-	systemordie_on_remote $host, $opt, "/bin/true";
-}
-
-sub _preparelocal ($$) {
-	my ($host, $opt) = @_;
-	mkdirordie  "$::WORKDIR/$host";
-	mkdirordie  "$::WORKDIR/$host/status";
-	mkdirordie  "$::WORKDIR/$host/conf";
-	systemordie "chmod go-rwx $::WORKDIR/$host";
-	systemordie "rsync -aSx $::LIBDIR/cmdblagent/ $::WORKDIR/$host/";
-}
-
-sub _prepareremote ($$) {
-	my ($host, $opt) = @_;
-	systemordie "rsync -aSx $::LIBDIR/cmdblagent/bin/ $::WORKDIR/$host/bin/";
-	sendordie $host, $opt, "$::WORKDIR/$host/", ".cmdblagent/";
-}
-
-sub _runremote ($$$) {
-	my ($host, $opt, $cmd) = @_;
-	systemordie_on_remote $host, $opt, ".cmdblagent/bin/$cmd";
-	recvordie $host, $opt, ".cmdblagent/status/", "$::WORKDIR/$host/status/";
-}
-
-sub _updatesnapshot ($) {
-	my ($snapshot) = @_;
-	my ($host, $time) = snapshot2hosttime $snapshot;
-	mkdirordie "$::STATUSDIR/$snapshot";
-	systemordie "rsync -aSx $::WORKDIR/$host/status/ $::STATUSDIR/$snapshot/";
-}
-
-########
-
-sub _load_pkginfo ($$$$$) {
-	my ($snapshot, $pkgtype, $path2pkgname, $pkgname2attrname2value, $pkgname2attrname2values) = @_;
-
-	my $f = "$::STATUSDIR/$snapshot/pkginfo_$pkgtype.tsv";
-
-	my $last_pkgname;
-	my $last_attrname;
-
-	open my $h, "<", $f or do {
-		return;
-	};
-	while( <$h> ){
-		chomp;
-		my ($pkgname, $attrname, @value) = split m"\t";
-		$last_pkgname = $pkgname if $pkgname ne "";
-		$last_attrname = $attrname if $attrname ne "";
-		next unless @value;
-
-		if    ( $last_attrname eq "MODULES" ){
-			my $path = $value[0];
-			push @{ $pkgname2attrname2values->{$last_pkgname}->{MODULES} }, $path;
-			$$path2pkgname{$path} = $last_pkgname;
-		}elsif( $last_attrname eq "MODIFIEDVCMODULES" ){
-			my $path = $value[0];
-			push @{ $pkgname2attrname2values->{$last_pkgname}->{MODIFIEDMODULES} }, $path;
-			$$path2pkgname{$path} = $last_pkgname;
-		}elsif( $last_attrname eq "VOLATILES" ){
-			my $path = $value[0];
-			push @{ $pkgname2attrname2values->{$last_pkgname}->{VOLATILES} }, $path;
-			$$path2pkgname{$path} = $last_pkgname;
-		}elsif( $last_attrname eq "SETTINGS" ){
-			my $path = $value[0];
-			push @{ $pkgname2attrname2values->{$last_pkgname}->{SETTINGS} }, $path;
-			$$path2pkgname{$path} = $last_pkgname;
-		}elsif( $last_attrname eq "VERSION" ){
-			$pkgname2attrname2value->{$last_pkgname}->{VERSION} = $value[0];
-			$pkgname2attrname2values->{$last_pkgname} //= {};
-		}elsif( $last_attrname eq "OPTIONS" ){
-			$pkgname2attrname2value->{$last_pkgname}->{OPTIONS}->{$value[0]} = $value[1];
-		}elsif( $last_attrname eq "MODIFIEDMODULES" ){
-		}else{
-			die "$last_attrname: illegal attribute, stopped";
-		}
-	}
-	close $h;
-}
-
-sub _parse_pkginfotext ($) {
-	my ($pkginfotext) = @_;
-
-	my %pkgattrs;
-	my %path2attr;
-
-	my $last_attr;
-	foreach my $item ( split m"\n", $pkginfotext ){
-		my ($attr, @value) = split m"\t", $item;
-		$last_attr = $attr if $attr ne '';
-		next unless @value;
-
-		if    ( $last_attr eq 'SYSTEMMODULES' ){
-			my ($mode, $uid_gid, $size, $mtime, $path, $link) = @value;
-			$path2attr{$path} = join(":", $last_attr, $mode, $uid_gid, $size, $mtime, $link);
-		}elsif( $last_attr eq 'SYSTEMSETTINGS' ){
-			my ($mode, $uid_gid, $size, $mtime, $path, $link) = @value;
-			$path2attr{$path} = join(":", $last_attr, $mode, $uid_gid, $size, $mtime, $link);
-		}elsif( $last_attr eq 'VCMODULES' ){
-			my ($mode, $uid_gid, $size, $mtime, $path, $link) = @value;
-			$path2attr{$path} = join(":", $last_attr, $mode, $uid_gid, $size, $mtime, $link);
-		}elsif( $last_attr eq 'MODIFIEDVCMODULES' ){
-			my ($mode, $uid_gid, $size, $mtime, $path, $link) = @value;
-			$path2attr{$path} = join(":", $last_attr, $mode, $uid_gid, $size, $mtime, $link);
-		}elsif( $last_attr eq 'VERSION' ){
-			my ($version) = @value;
-			$pkgattrs{$last_attr} = $version;
-		}else{
-			die;
-		}
-	}
-	return \%pkgattrs, \%path2attr;
-}
-
-sub _load_filelist ($$$) {
-	my ($snapshot, $listname, $path2listname) = @_;
-
-	my $f = "$::STATUSDIR/$snapshot/$listname.tsv";
-	open my $h, "<", $f or do {
-		return;
-	};
-	while( <$h> ){
-		chomp;
-		$$path2listname{$_} = $listname;
-	}
-	close $h;
-}
-
 sub _foreach_fileinfo ($&) {
 	my ($host, $sub) = @_;
 
@@ -283,79 +153,26 @@ sub _parse_as_userdefined_rules (@) {
 	return @rules;
 }
 
-sub _generate_vcpkg_diff ($) {
-	my ($new) = @_;
-	my ($pkgattrs, $path2attr) = _parse_pkginfotext $new;
-
-	my @diff;
-	foreach my $path ( sort keys %$path2attr ){
-		my $attr = $path2attr->{$path};
-		next unless $attr =~ m"^MODIFIEDVCMODULES:(.*)$";
-		push @diff, "$path\t?\t$1";
-	}
-
-	return join "\t", @diff;
+sub _merge_names (@) {
+	my %r;
+	foreach my $i ( @_ ){ $r{$i} = 1; }
+	return keys %r;
 }
 
-sub _generate_ospkg_diff ($$) {
-	my ($orig, $new) = @_;
-	my ($orig_pkgattrs, $orig_path2attr) = _parse_pkginfotext $orig;
-	my ($new_pkgattrs, $new_path2attr) = _parse_pkginfotext $new;
+sub _diff_package_version ($$) {
+	my ($old, $new) = @_;
+	my %d;
+	while( my ($k, $v) = each %$old ){ $d{$k} += 1; }
+	while( my ($k, $v) = each %$new ){ $d{$k} += 2; }
 
-	my %path2exist;
-	while( my($k, undef) = each %$orig_path2attr ){ $path2exist{$k} |= 1; }
-	while( my($k, undef) = each %$new_path2attr ){ $path2exist{$k} |= 2; }
-
-	my @diff;
-	foreach my $path ( sort keys %path2exist ){
-		my $n = $path2exist{$path};
-		if    ( $n == 1 ){
-			my $orig_attr = $orig_path2attr->{$path};
-			push @diff, "$path\t$orig_attr\t-";
-		}elsif( $n == 2 ){
-			my $new_attr = $new_path2attr->{$path};
-			push @diff, "$path\t-\t$new_attr";
-		}else{
-			my $orig_attr = $orig_path2attr->{$path};
-			my $new_attr = $new_path2attr->{$path};
-			push @diff, "$path\t$orig_attr\t$new_attr";
-		}
+	my %r;
+	while( my ($k, $v) = each %d ){
+		my $old_version = $$old{$k}->{VERSION} // '-';
+		my $new_version = $$new{$k}->{VERSION} // '-';
+		next if $old_version eq $new_version;
+		$r{$k} = [ $old_version, $new_version ];
 	}
-	
-	return join "\t", @diff;
-}
-
-sub _load_settingcontents ($$$) {
-	my ($snapshot, $path2type, $path2content) = @_;
-
-	my $f = "$::STATUSDIR/$snapshot/settingcontents.tsv";
-
-	my $last_path;
-	my $last_attrname;
-
-	open my $h, "<", $f or do {
-		die "$f: cannot open, stopped";
-	};
-	while( <$h> ){
-		chomp;
-		my @v = split m"\t";
-		my ($path, $attrname, @value) = @v;
-		$last_path     = $path     if $path     ne "";
-		$last_attrname = $attrname if $attrname ne "";
-
-		next if @v < 3;
-		if    ( $last_attrname eq "TYPE" ){
-			$$path2type{$last_path} = $value[0];
-
-		}elsif( $last_attrname eq "CONTENT" ){
-			my $l = join "\t", @value;
-			push @{ $$path2content{$last_path} }, $l;
-
-		}else{
-			die "$last_attrname: illegal attribute, stopped";
-		}
-	}
-	close $h;
+	return %r;
 }
 
 sub _diff_path ($$) {
@@ -377,10 +194,6 @@ sub _diff_path ($$) {
 	return \@remove, \@add, \@comm;
 }
 
-sub _diff_content ($$) {
-}
-
-
 ########
 
 sub subcmd_get_fileinfo ($) {
@@ -393,17 +206,17 @@ sub subcmd_get_fileinfo ($) {
 	create_snapshot $snapshot unless snapshot_is_present $snapshot;
 	die unless snapshot_is_latest $snapshot;
 
-	_preparelocal  $host, $hostoption;
+	remotectl_prepare_local  $host, $hostoption;
 	my @settings = pickout_for_targethost_from_glabal_conffiles
 		$host, "fileinfo_excludefiles";
 	write_perhost_conffile $host, "fileinfo_excludefiles", @settings;
 
-	_initremote    $host, $hostoption;
-	_prepareremote $host, $hostoption;
-	_runremote     $host, $hostoption, "get_fileinfo";
+	remotectl_init    $host, $hostoption;
+	remotectl_prepare_remote $host, $hostoption;
+	remotectl_run     $host, $hostoption, "get_fileinfo";
 	write_timestamp $snapshot, "update";
 
-	_updatesnapshot $snapshot;
+	update_snapshot $snapshot;
 }
 
 sub subcmd_get_pkginfo_os ($) {
@@ -415,16 +228,16 @@ sub subcmd_get_pkginfo_os ($) {
 
 	die unless snapshot_is_latest $snapshot;
 
-	_preparelocal  $host, $hostoption;
+	remotectl_prepare_local  $host, $hostoption;
 
-	_initremote    $host, $hostoption;
-	_prepareremote $host, $hostoption;
-	_runremote     $host, $hostoption, "get_pkginfo_rpm";
-	_runremote     $host, $hostoption, "get_pkginfo_deb";
-	_runremote     $host, $hostoption, "get_pkginfo_alternatives";
+	remotectl_init    $host, $hostoption;
+	remotectl_prepare_remote $host, $hostoption;
+	remotectl_run     $host, $hostoption, "get_pkginfo_rpm";
+	remotectl_run     $host, $hostoption, "get_pkginfo_deb";
+	remotectl_run     $host, $hostoption, "get_pkginfo_alternatives";
 	write_timestamp $snapshot, "update";
 
-	_updatesnapshot $snapshot;
+	update_snapshot $snapshot;
 }
 
 sub subcmd_get_pkginfo_git ($) {
@@ -436,17 +249,17 @@ sub subcmd_get_pkginfo_git ($) {
 
 	die unless snapshot_is_latest $snapshot;
 
-	_preparelocal  $host, $hostoption;
+	remotectl_prepare_local  $host, $hostoption;
 	my @settings = pickout_for_targethost_from_glabal_conffiles
 		$host, "pkginfo_git_excluderepos";
 	write_perhost_conffile $host, "pkginfo_git_excluderepos", @settings;
 
-	_initremote    $host, $hostoption;
-	_prepareremote $host, $hostoption;
-	_runremote     $host, $hostoption, "get_pkginfo_git";
+	remotectl_init    $host, $hostoption;
+	remotectl_prepare_remote $host, $hostoption;
+	remotectl_run     $host, $hostoption, "get_pkginfo_git";
 	write_timestamp $snapshot, "update";
 
-	_updatesnapshot $snapshot;
+	update_snapshot $snapshot;
 }
 
 sub subcmd_fix_pkginfo_os ($) {
@@ -469,11 +282,11 @@ sub subcmd_fix_pkginfo_os ($) {
 
 	my $pkgname2attrname2value = {};
 	my $pkgname2attrname2values = {};
-	_load_pkginfo $snapshot, 'rpm', {},
+	load_pkginfo $snapshot, 'rpm', {},
 		$pkgname2attrname2value, $pkgname2attrname2values;
-	_load_pkginfo $snapshot, 'deb', {},
+	load_pkginfo $snapshot, 'deb', {},
 		$pkgname2attrname2value, $pkgname2attrname2values;
-	_load_pkginfo $snapshot, 'alternatives', {},
+	load_pkginfo $snapshot, 'alternatives', {},
 		$pkgname2attrname2value, $pkgname2attrname2values;
 
 	# パス名のディレクトリ部分に symlink を含むものは、含まない絶対パス名に変換する
@@ -558,8 +371,8 @@ sub subcmd_extract_pkginfo_userdefined ($) {
 			$host, "pkginfo_userdefined_rules";
 
 	my $path2pkgname = {};
-	_load_pkginfo $snapshot, "os",  $path2pkgname, {}, {};
-	_load_pkginfo $snapshot, "git", $path2pkgname, {}, {};
+	load_pkginfo $snapshot, "os",  $path2pkgname, {}, {};
+	load_pkginfo $snapshot, "git", $path2pkgname, {}, {};
 
 	my %pkgname2attrname2values;
 	my %pkgname2attrname2value;
@@ -628,6 +441,49 @@ sub subcmd_extract_pkginfo_userdefined ($) {
 	close $h;
 }
 
+sub subcmd_extract_pkginfo_whole ($) {
+	my ($snapshot) = @_;
+	my ($host, $time) = snapshot2hosttime $snapshot;
+	my $hostoption = parse_as_keyvalues
+		pickout_for_targethost_from_glabal_conffiles 
+			$host, "hostoptions";
+
+	die unless snapshot_is_present $snapshot;
+
+	my $pkgname2attrname2value = {};
+	my $pkgname2attrname2values = {};
+	load_pkginfo $snapshot, 'os', {},
+		$pkgname2attrname2value, $pkgname2attrname2values;
+	load_pkginfo $snapshot, 'git', {},
+		$pkgname2attrname2value, $pkgname2attrname2values;
+	load_pkginfo $snapshot, 'userdefined', {},
+		$pkgname2attrname2value, $pkgname2attrname2values;
+
+	# pkginfo_whole として統合した情報をファイル出力する
+	my $f = "$::STATUSDIR/$snapshot/pkginfo_whole.tsv";
+	open my $h, '>', $f or do {
+		die;
+	};
+	foreach my $pkgname ( sort keys %$pkgname2attrname2value ){
+		my $attrname2value  = $$pkgname2attrname2value {$pkgname};
+		my $attrname2values = $$pkgname2attrname2values{$pkgname};
+		print $h "$pkgname\n";
+		foreach my $attrname ( sort keys %$attrname2value ){
+			my $value = $$attrname2value{$attrname};
+			print $h "\t$attrname\t$value\n";
+		}
+		foreach my $attrname ( sort keys %$attrname2values ){
+			my $values = $$attrname2values{$attrname};
+			next unless defined $values;
+			print $h "\t$attrname\n";
+			foreach my $i ( sort @$values ){
+				print $h "\t\t$i\n";
+			}
+		}
+	}
+	close $h;
+}
+
 sub subcmd_extract_volatiles ($) {
 	my ($snapshot) = @_;
 	my ($host, $time) = snapshot2hosttime $snapshot;
@@ -641,11 +497,7 @@ sub subcmd_extract_volatiles ($) {
 
 	my $path2pkgname = {};
 	my $pkgname2attrname2values = {};
-	_load_pkginfo $snapshot, 'os',
-		$path2pkgname, {}, $pkgname2attrname2values;
-	_load_pkginfo $snapshot, 'git',
-		$path2pkgname, {}, $pkgname2attrname2values;
-	_load_pkginfo $snapshot, 'userdefined',
+	load_pkginfo $snapshot, 'whole',
 		$path2pkgname, {}, $pkgname2attrname2values;
 
 	# volatile ones descripted in pkginfo are preffered than volatile ones descripted in conffile.
@@ -698,11 +550,7 @@ sub subcmd_extract_settings ($) {
 
 	my $path2pkgname = {};
 	my $pkgname2attrname2values = {};
-	_load_pkginfo $snapshot, 'os',
-		$path2pkgname, {}, $pkgname2attrname2values;
-	_load_pkginfo $snapshot, 'git',
-		$path2pkgname, {}, $pkgname2attrname2values;
-	_load_pkginfo $snapshot, 'userdefined',
+	load_pkginfo $snapshot, 'whole',
 		$path2pkgname, {}, $pkgname2attrname2values;
 
 	# settings descripted in pkginfo are preffered than settings descripted in conffile.
@@ -754,12 +602,10 @@ sub subcmd_extract_unmanaged ($) {
 	my %unmanagedfile;
 
 	my $path2pkgname = {};
-	_load_pkginfo  $snapshot, "os",           $path2pkgname, {}, {};
-	_load_pkginfo  $snapshot, "git",          $path2pkgname, {}, {};
-	_load_pkginfo  $snapshot, 'userdefined',  $path2pkgname, {}, {};
+	load_pkginfo  $snapshot, 'whole',        $path2pkgname, {}, {};
 
-	_load_filelist $snapshot, "settings",     $path2pkgname;
-	_load_filelist $snapshot, "volatiles",    $path2pkgname;
+	load_filelist $snapshot, "settings",     $path2pkgname;
+	load_filelist $snapshot, "volatiles",    $path2pkgname;
 
 	_foreach_fileinfo $snapshot, sub {
 		my ($perm, $uid_gid, $size, $mtime, $path, $symlink) = @_;
@@ -786,7 +632,7 @@ sub subcmd_get_pkginfo_other ($) {
 	# OSパッケージについて pkginfo の読み込み
 	my $pkgname2attrname2value = {};
 	my $pkgname2attrname2values = {};
-	_load_pkginfo $hostname, 'os', {}, $pkgname2attrname2value, $pkgname2attrname2values;
+	load_pkginfo $hostname, 'os', {}, $pkgname2attrname2value, $pkgname2attrname2values;
 
 	foreach my $pkgname ( sort keys %$pkgname2attrname2value ){
 		my $attrname2value  = $pkgname2attrname2value->{$pkgname};
@@ -820,15 +666,15 @@ sub subcmd_get_settingcontents ($) {
 
 	die unless snapshot_is_latest $snapshot;
 
-	_preparelocal  $host, $hostoption;
+	remotectl_prepare_local  $host, $hostoption;
 	systemordie "rsync -aSx $::STATUSDIR/$snapshot/settings.tsv $::WORKDIR/$host/conf/settings";
 
-	_initremote    $host, $hostoption;
-	_prepareremote $host, $hostoption;
-	_runremote     $host, $hostoption, "get_settingcontents";
+	remotectl_init    $host, $hostoption;
+	remotectl_prepare_remote $host, $hostoption;
+	remotectl_run     $host, $hostoption, "get_settingcontents";
 	write_timestamp $snapshot, "update";
 
-	_updatesnapshot $snapshot;
+	update_snapshot $snapshot;
 }
 
 sub subcmd_wrapup ($) {
@@ -840,11 +686,11 @@ sub subcmd_wrapup ($) {
 
 	my $pkgname2attrname2values = {};
 	my $pkgname2attrname2value = {};
-	_load_pkginfo $snapshot, 'os',
+	load_pkginfo $snapshot, 'os',
 		{}, $pkgname2attrname2value, $pkgname2attrname2values;
-	_load_pkginfo $snapshot, 'git',
+	load_pkginfo $snapshot, 'git',
 		{}, $pkgname2attrname2value, $pkgname2attrname2values;
-	_load_pkginfo $snapshot, 'userdefined',
+	load_pkginfo $snapshot, 'userdefined',
 		{}, $pkgname2attrname2value, $pkgname2attrname2values;
 
 	my $f = "$::STATUSDIR/$snapshot/pkgnames.tsv";
@@ -867,12 +713,40 @@ sub subcmd_wrapup ($) {
 	close $h;
 }
 
-sub subcmd_diff ($$) {
+sub subcmd_diff_package_versions ($$) {
 	my ($old_snapshot, $new_snapshot) = @_;
 
 	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
-	#my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
+	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
+	die unless snapshot_is_present $old_snapshot;
+	die unless snapshot_is_present $new_snapshot;
 
+	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
+	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
+
+	die unless snapshot_is_present $old_snapshot;
+	die unless snapshot_is_present $new_snapshot;
+
+	my $old_pkgname2attrname2value;
+	my $new_pkgname2attrname2value;
+	load_pkginfo $old_snapshot, 'whole', {}, $old_pkgname2attrname2value, {};
+	load_pkginfo $new_snapshot, 'whole', {}, $new_pkgname2attrname2value, {};
+
+	my %d = _diff_package_version
+		$old_pkgname2attrname2value, $new_pkgname2attrname2value;
+	foreach my $pkgname ( sort keys %d ){
+		my $v = $d{$pkgname};
+		my $old_version = $$v[0];
+		my $new_version = $$v[1];
+		print "$pkgname	$old_version	$new_version\n";
+	}
+}
+
+sub subcmd_diff_package_settings ($$) {
+	my ($old_snapshot, $new_snapshot) = @_;
+
+	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
+	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
 	die unless snapshot_is_present $old_snapshot;
 	die unless snapshot_is_present $new_snapshot;
 
@@ -880,66 +754,124 @@ sub subcmd_diff ($$) {
 	my $old_path2content = {};
 	my $new_path2type = {};
 	my $new_path2content = {};
-	_load_settingcontents $old_snapshot, $old_path2type, $old_path2content;
-	_load_settingcontents $new_snapshot, $new_path2type, $new_path2content;
+	load_settingcontents $old_snapshot, $old_path2type, $old_path2content;
+	load_settingcontents $new_snapshot, $new_path2type, $new_path2content;
+
+	my $old_pkgname2attrname2values = {};
+	my $new_pkgname2attrname2values = {};
+	load_pkginfo $old_snapshot, 'whole', {}, {}, $old_pkgname2attrname2values;
+	load_pkginfo $new_snapshot, 'whole', {}, {}, $new_pkgname2attrname2values;
+
+	my @pkgnames = _merge_names
+		keys(%$old_pkgname2attrname2values),
+		keys(%$new_pkgname2attrname2values);
 
 	require Text::Diff;
 
-	my ($remove, $add, $comm) = _diff_path $old_path2type, $new_path2type;
-	my @modify;
-	foreach my $k ( @$comm ){
-		my $old_arrref = $$old_path2content{$k};
-		my $new_arrref = $$new_path2content{$k};
-		my $old_type;
-		my $new_type;
-		#my $old_type = $$old_type{$k};
-		#my $new_type = $$new_type{$k};
+	foreach my $pkgname ( @pkgnames ){
+		my @setting_paths = _merge_names
+			@{$$old_pkgname2attrname2values{$pkgname}->{SETTINGS}},
+			@{$$new_pkgname2attrname2values{$pkgname}->{SETTINGS}};
 
-		#unless( $old_type eq $new_type ){
-		#	push @modify, {
-		#		PATH => $k,
-		#		DIFF => [ "$old_type => $new_type\n" ]
-		#	};
-		#	next;
-		#}
-
-		if( $old_type eq "" ){
-			my ($old, $new) ;
-			$old = join "\n", @$old_arrref if defined $old_arrref;
-			$new = join "\n", @$new_arrref if defined $new_arrref;
-			next if $old eq $new;
-
-			my @output;
-			my $diff = Text::Diff::diff( \$old, \$new, {
-				STYLE => 'Unified',
-				FILENAME_A => "$old_snapshot:$k",
-				FILENAME_B => "$new_snapshot:$k",
-				CONTEXT => 3,
-				OUTPUT => \@output,
-			} );
-			push @modify, { PATH => $k, DIFF => \@output };
+		my @diff;
+		foreach my $setting_path ( @setting_paths ){
+			my $old_type    = $$old_path2type{$setting_path};
+			my $new_type    = $$new_path2type{$setting_path};
+			my $old_content = $$old_path2content{$setting_path};
+			my $new_content = $$new_path2content{$setting_path};
+			my @d = _diff_text $setting_path,
+				"$old_snapshot:$setting_path",
+				"$new_snapshot:$setting_path",
+				$old_type, $new_type,
+				$old_content, $new_content;
+			next unless @d;
+			push @diff, $setting_path;
+			foreach my $i ( @d ){ push @diff, "	$i"; }
 		}
+		next unless @diff;
+		print "$pkgname\n";
+		foreach my $i ( @diff ){ print "	$i\n"; }
 	}
+}
 
-		my %r;
-		foreach my $k ( @$remove ){ $r{$k} = { ACTION => "REMOVE" }; }
-		foreach my $k ( @$add )   { $r{$k} = { ACTION => "ADD" }; }
-		foreach my $k ( @modify ) {
-			$r{$$k{PATH}} = { ACTION => "MODIFY", DIFF => $$k{DIFF} };
-		}
+sub subcmd_diff_system_settings ($$) {
+	my ($old_snapshot, $new_snapshot) = @_;
 
-	foreach my $path ( sort keys %r ){
-		my $v = $r{$path};
-		my $action = $$v{ACTION};
-		my $diff   = $$v{DIFF};
-		print "$path\t$action\n";
-		if( $diff ){
-			my $text = join "", @$diff;
-			foreach my $i ( split "\n", $text ){
-				print "\t\t$i\n";
-			}
-		}
+	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
+	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
+	die unless snapshot_is_present $old_snapshot;
+	die unless snapshot_is_present $new_snapshot;
+
+	my $old_path2type = {};
+	my $old_path2content = {};
+	my $new_path2type = {};
+	my $new_path2content = {};
+	load_settingcontents $old_snapshot, $old_path2type, $old_path2content;
+	load_settingcontents $new_snapshot, $new_path2type, $new_path2content;
+
+	my $old_path2pkgname = {};
+	my $new_path2pkgname = {};
+	my $new_pkgname2attrname2values = {};
+	load_pkginfo $old_snapshot, 'whole', $old_path2pkgname, {}, {};
+	load_pkginfo $new_snapshot, 'whole', $old_path2pkgname, {}, {};
+
+	my @package_paths = _merge_names
+		keys(%$old_path2pkgname), keys(%$new_path2pkgname);
+	my @setting_paths = _merge_names
+		keys(%$old_path2type), keys(%$new_path2type);
+
+	my %package_paths;
+	foreach my $package_path ( @package_paths ){
+		$package_paths{$package_path} = 1;
 	}
+	
+	require Text::Diff;
+
+	my @diff;
+	foreach my $setting_path ( @setting_paths ){
+		next if $package_paths{$setting_path};
+
+		my $old_type    = $$old_path2type{$setting_path};
+		my $new_type    = $$new_path2type{$setting_path};
+		my $old_content = $$old_path2content{$setting_path};
+		my $new_content = $$new_path2content{$setting_path};
+		my @d = _diff_text $setting_path,
+			"$old_snapshot:$setting_path",
+			"$new_snapshot:$setting_path",
+			$old_type, $new_type,
+			$old_content, $new_content;
+		next unless @d;
+		push @diff, $setting_path;
+		foreach my $i ( @d ){ push @diff, "	$i"; }
+	}
+	return unless @diff;
+	foreach my $i ( @diff ){ print "$i\n"; }
+}
+
+sub subcmd_diff ($$) {
+	my ($old_snapshot, $new_snapshot) = @_;
+
+	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
+	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
+	die unless snapshot_is_present $old_snapshot;
+	die unless snapshot_is_present $new_snapshot;
+
+	subcmd_diff_package_versions $old_snapshot, $new_snapshot;
+	#subcmd_diff_package_settings $old_snapshot, $new_snapshot;
+	subcmd_diff_system_settings  $old_snapshot, $new_snapshot;
+
+	#foreach my $path ( sort keys %r ){
+	#	my $v = $r{$path};
+	#	my $action = $$v{ACTION};
+	#	my $diff   = $$v{DIFF};
+	#	print "$path\t$action\n";
+	#	if( $diff ){
+	#		my $text = join "", @$diff;
+	#		foreach my $i ( split "\n", $text ){
+	#			print "\t\t$i\n";
+	#		}
+	#	}
+	#}
 
 	exit 0;
 }
@@ -953,6 +885,7 @@ sub import {
 *{caller . "::subcmd_get_pkginfo_git"}   = \&subcmd_get_pkginfo_git;
 *{caller . "::subcmd_fix_pkginfo_os"}    = \&subcmd_fix_pkginfo_os;
 *{caller . "::subcmd_extract_pkginfo_userdefined"}  = \&subcmd_extract_pkginfo_userdefined;
+*{caller . "::subcmd_extract_pkginfo_whole"} = \&subcmd_extract_pkginfo_whole;
 *{caller . "::subcmd_extract_settings"}  = \&subcmd_extract_settings;
 *{caller . "::subcmd_extract_volatiles"} = \&subcmd_extract_volatiles;
 *{caller . "::subcmd_extract_unmanaged"} = \&subcmd_extract_unmanaged;

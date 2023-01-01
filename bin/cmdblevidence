@@ -65,6 +65,10 @@ if    ( $subcmd eq 'get_fileinfo' ){
 	foreach my $snapshot ( @args ){
 		subcmd_extract_pkginfo_userdefined $snapshot;
 	}
+}elsif( $subcmd eq 'extract_pkginfo_whole' ){
+	foreach my $snapshot ( @args ){
+		subcmd_extract_pkginfo_whole $snapshot;
+	}
 }elsif( $subcmd eq 'extract_volatiles' ){
 	foreach my $snapshot ( @args ){
 		subcmd_extract_volatiles $snapshot;
@@ -114,6 +118,11 @@ if    ( $subcmd eq 'get_fileinfo' ){
 		subcmd_extract_pkginfo_userdefined "$hostname\@$timeid"; print ".";
 	}
 	print "\n";
+	print "extract_pkginfo_whole";
+	foreach my $hostname ( @args ){
+		subcmd_extract_pkginfo_whole "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
 	print "extract_volatiles";
 	foreach my $hostname ( @args ){
 		subcmd_extract_volatiles "$hostname\@$timeid"; print ".";
@@ -153,6 +162,11 @@ if    ( $subcmd eq 'get_fileinfo' ){
 	print "extract_pkginfo_userdefined";
 	foreach my $hostname ( @args ){
 		subcmd_extract_pkginfo_userdefined "$hostname\@$timeid"; print ".";
+	}
+	print "\n";
+	print "extract_pkginfo_whole";
+	foreach my $hostname ( @args ){
+		subcmd_extract_pkginfo_whole "$hostname\@$timeid"; print ".";
 	}
 	print "\n";
 	print "extract_volatiles";
