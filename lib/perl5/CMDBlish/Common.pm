@@ -573,7 +573,7 @@ sub import {
 *{caller . "::snapshot_is_present"}	= \&snapshot_is_present;
 *{caller . "::snapshot_is_latest"}	= \&snapshot_is_latest;
 *{caller . "::create_snapshot"}		= \&create_snapshot;
-*{caller . "::update_snapshot"}		= \&updates_napshot;
+*{caller . "::update_snapshot"}		= \&update_snapshot;
 *{caller . "::parse_as_keyvalues"}	= \&parse_as_keyvalues;
 *{caller . "::parse_as_regexplist"}	= \&parse_as_regexplist;
 

@@ -5,6 +5,7 @@ package CMDBlish::Report;
 use strict;
 use Cwd 'abs_path';
 use Digest::MD5;
+use Text::Diff;
 
 use CMDBlish::Common;
 
@@ -59,10 +60,102 @@ sub _load_passwd ($) {
 	return {} unless defined $$path2content{"/etc/passwd"};
 	my %r;
 	foreach my $i ( @{ $$path2content{"/etc/passwd"} } ){
-		my ($user, undef, undef, undef, undef, $dir) = split m":", $i;
+		my ($user, undef, undef, undef, undef, $dir, $shell) = split m":", $i;
+		next if $shell =~ m"^(/usr/sbin|/usr/bin|/sbin|/bin)/(nologin|true|false)$";
 		$r{$user} = $dir;
 	}
 	return %r;
+}
+
+sub _parse_as_ssh_config ($) {
+	my ($content) = @_;
+	my %r = (
+		".ssh/id_rsa"		=> 1,
+		".ssh/id_dsa"		=> 1,
+		".ssh/id_ecdsa"		=> 1,
+		".ssh/id_ecdsa_sk"	=> 1,
+		".ssh/id_ed25519"	=> 1,
+		".ssh/id_ed25519_sk"	=> 1
+	);
+	return keys %r;
+}
+
+sub _parse_as_sshd_config ($) {
+	my ($content) = @_;
+	my %r = ( ".ssh/authorized_keys" => 1, ".ssh/authorized_keys2" => 1 );
+	foreach my $i ( @$content ){
+		next unless $i =~ m"^\s*AuthorizedKeysFile\s+(\S.*)$"i;
+		%r = ();
+		foreach my $j ( split m"\s+", $1 ){ $r{$j} = 1; }
+	}
+	return keys %r;
+}
+
+sub _parse_as_pubkey ($) {
+	my ($content) = @_;
+	my @r;
+	foreach my $i ( @$content ){
+		next if $i =~ m"^\s*$";
+		next unless $i =~ m"^([-\w]+)\s+(\S+)(?:\s+(\S.*)?)?$";
+		my $keytype = $1;
+		my $pubkey  = $2;
+		my $comment = $3;
+		push @r, "$keytype|$pubkey";
+	}
+	return @r;
+}
+
+sub _parse_as_authorized_keys ($) {
+	my ($content) = @_;
+	my @r;
+	foreach my $i ( @$content ){
+		next if $i =~ m"^\s*$";
+		next unless $i =~ m{^
+			\s*
+			(?:
+				(
+					(?:[-\w]+(?:=(?:"[^"]*"|[^\s,"]*))?,)*
+					(?:[-\w]+(?:=(?:"[^"]*"|[^\s,"]*))?)
+				)
+				\s+
+			)?
+			([-\w]+)\s+(\S+)(?:\s+(\S.*)?)?
+		$}x;
+		my $options_text = $1;
+		my $keytype = $2;
+		my $pubkey  = $3;
+		my $comment = $4;
+		my $shortkey = substr $pubkey, -16;
+		my $options;
+		if( $options_text ){
+			$options = {};
+			while( $options_text ){
+				$options_text =~ m{^
+					([-\w]+)
+					(?:=  (?: "([^"]*)"|([^\s,"]*) )  )?
+					(,|$)
+				}x or die "[$i], [$options_text], stopped";
+				my $k = lc $1;
+				my $v = $2 // $3;
+				$$options{$k} = $v;
+				$options_text = $';
+			}
+		}
+		push @r, ["$keytype|$pubkey", "$shortkey|$comment", $options];
+	}
+	return @r;
+}
+
+sub _canonical ($$$) {
+	my ($path, $username, $homedir) = @_;
+	$path = "$homedir/$path" unless $path =~ m"^/";
+
+	$path =~ s{%u}{$username}g;
+
+	while( $path =~ s{//}{/} ){}
+	while( $path =~ s{/\./}{/} ){}
+	while( $path =~ s{/([^/]+)/\.\./}{/} ){}
+	return $path;
 }
 
 ########
@@ -119,8 +212,6 @@ sub subcmd_diff_package_settings ($$) {
 	my @pkgnames = _merge_names
 		keys(%$old_pkgname2attrname2values),
 		keys(%$new_pkgname2attrname2values);
-
-	require Text::Diff;
 
 	foreach my $pkgname ( @pkgnames ){
 		my @setting_paths = _merge_names
@@ -267,6 +358,8 @@ sub _parse_as_crontab ($$$) {
 	}
 }
 
+our @CRONBASEDIR = ( "/var/spool/cron", "/var/spool/cron/crontabs" );
+
 sub subcmd_crontab ($) {
 	my ($snapshot) = @_;
 	my ($host, $time) = snapshot2hosttime $snapshot;
@@ -281,7 +374,8 @@ sub subcmd_crontab ($) {
 
 	# user crontab
 	while( my ($user, undef) = each %homedir ){
-		foreach my $d ( "/var/spool/cron/$user", "/var/spool/cron/crontabs/$user" ){
+		foreach my $b ( @CRONBASEDIR ){
+			my $d = "$b/$user";
 			next unless defined $$path2content{$d};
 			_parse_as_crontab \%crontab, $user, $$path2content{$d};
 		}
@@ -318,23 +412,96 @@ sub subcmd_crontab ($) {
 	}
 }
 
-sub subcmd_ssh ($) {
-	# 全ホストに対して繰り返す
-		# ユーザ名とホームディレクトリの一覧を取得する
+our @SSH_SYSTEMCONFIG  = ( "/etc/ssh/ssh_config" );
+our @SSHD_SYSTEMCONFIG = ( "/etc/ssh/sshd_config" );
 
-	# 全ホストに対して繰り返す
-		# システムコンフィグを探す
-		# システムコンフィグからユーザコンフィグとIdentityFileとAuthorizedKeysの位置を取得する
-		# 全ユーザに対して繰り返す
-			# ユーザごとのユーザコンフィグを探す
-			# ユーザコンフィグからIdentityFileとAuthorizedKeysの位置を取得する
-			# IdentityFileとAuthorizedKeysを取得する
+sub subcmd_ssh ($@) {
+	my ($timeid, @host) = @_;
 
-	# 公開鍵->ユーザ@ホスト のマッピングを生成する
+	my %pubkey2userhosts;
+	my %userhost2authorizedkeys;
 
-	# 全ホストに対して繰り返す
-		# 全ユーザに対して繰り返す
-			# AuthorizedKeys->ユーザ@ホスト のマッピングを生成する
+	foreach my $host ( @host ){
+		my $snapshot = "$host\@$timeid";
+		die unless snapshot_is_present $snapshot;
+
+		my $path2type = {};
+		my $path2content = {};
+		load_settingcontents $snapshot, $path2type, $path2content;
+
+		my %user2homedir = _load_passwd $path2content;
+		
+		my @identities;
+		my @authorizedkeys;
+		foreach my $f ( @SSH_SYSTEMCONFIG ){
+			next unless defined $$path2content{$f};
+			@identities = _parse_as_ssh_config $$path2content{$f};
+		}
+		foreach my $f ( @SSHD_SYSTEMCONFIG ){
+			next unless defined $$path2content{$f};
+			@authorizedkeys = _parse_as_sshd_config $$path2content{$f};
+		}
+
+		while( my ($user, $homedir) = each %user2homedir ){
+			my $userhost = "$user\@$host";
+			foreach my $i ( @identities ){
+				my $f = _canonical "$i.pub", $user, $homedir;
+				next unless defined $$path2content{$f};
+
+				my @pubkey = _parse_as_pubkey $$path2content{$f};
+				foreach my $i ( @pubkey ){
+					push @{$pubkey2userhosts{$i}}, $userhost;
+				}
+			}
+			foreach my $i ( @authorizedkeys ){
+				my $f = _canonical $i, $user, $homedir;
+				next unless defined $$path2content{$f};
+
+				my @authorized_keys = _parse_as_authorized_keys $$path2content{$f};
+				push @{$userhost2authorizedkeys{$userhost}}, @authorized_keys;
+			}
+		}
+	}
+
+	my %login;
+	foreach my $dst_userhost ( sort keys %userhost2authorizedkeys ){
+		my $authorizedkeys = $userhost2authorizedkeys{$dst_userhost};
+		my %src_userhost;
+		foreach my $keyinfo ( @$authorizedkeys ){
+			my ($pubkey, $comment, $options) = @$keyinfo;
+			my $src_userhosts = $pubkey2userhosts{$pubkey};
+			if( $src_userhosts ){
+				foreach my $src_userhost ( @$src_userhosts ){
+					$src_userhost{$src_userhost} = $options;
+				}
+			}else{
+				$src_userhost{"UNKNOWN($comment)"} = $options;
+			}
+		}
+
+		foreach my $src_userhost ( keys %src_userhost ){
+			my $options = $src_userhost{$src_userhost};
+			if( $options ){
+				my @options;
+				foreach my $k ( keys %$options ){
+					my $v = $$options{$k};
+					if( $v ne "" ){
+						push @options, $k.'="'.$v.'"';
+					}else{
+						push @options, $k;
+					}
+				}
+				$dst_userhost .= "\t" . join ",", @options;
+			}
+			push @{$login{$src_userhost}}, $dst_userhost;
+		}
+	}
+
+	foreach my $src_userhost ( sort keys %login ){
+		foreach my $dst_userhost ( @{$login{$src_userhost}} ){
+			print "$src_userhost => $dst_userhost\n";
+		}
+	}
 }
 
 ########
