@@ -190,9 +190,23 @@ if    ( $subcmd eq 'get_fileinfo' ){
 	}
 	print "\n";
 
-}elsif( $subcmd eq 'diff' ){
-	my ($old, $new) = @args;
-	subcmd_diff $old, $new;
+}elsif( $subcmd eq 'gzip' ){
+	my (@snapshots) = @args;
+	$| = 1;
+	print "gzip";
+	foreach my $snapshot ( @snapshots ){
+		subcmd_gzip $snapshot; print ".";
+	}
+	print "\n";
+
+}elsif( $subcmd eq 'gunzip' ){
+	my (@snapshots) = @args;
+	$| = 1;
+	print "gunzip";
+	foreach my $snapshot ( @snapshots ){
+		subcmd_gunzip $snapshot; print ".";
+	}
+	print "\n";
 
 }else{
 	die;

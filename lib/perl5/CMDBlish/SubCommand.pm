@@ -204,7 +204,10 @@ sub subcmd_get_fileinfo ($) {
 	my $hostoption = parse_as_keyvalues @hostoptions;
 
 	create_snapshot $snapshot unless snapshot_is_present $snapshot;
-	die unless snapshot_is_latest $snapshot;
+	unless( snapshot_is_latest $snapshot ){
+		print STDERR "$snapshot: not latest snapshot.\n";
+		return;
+	}
 
 	remotectl_prepare_local  $host, $hostoption;
 	my @settings = pickout_for_targethost_from_glabal_conffiles
@@ -226,7 +229,10 @@ sub subcmd_get_pkginfo_os ($) {
 		$host, "hostoptions";
 	my $hostoption = parse_as_keyvalues @hostoptions;
 
-	die unless snapshot_is_latest $snapshot;
+	unless( snapshot_is_latest $snapshot ){
+		print STDERR "$snapshot: not latest snapshot.\n";
+		return;
+	}
 
 	remotectl_prepare_local  $host, $hostoption;
 
@@ -247,7 +253,10 @@ sub subcmd_get_pkginfo_git ($) {
 		$host, "hostoptions";
 	my $hostoption = parse_as_keyvalues @hostoptions;
 
-	die unless snapshot_is_latest $snapshot;
+	unless( snapshot_is_latest $snapshot ){
+		print STDERR "$snapshot: not latest snapshot.\n";
+		return;
+	}
 
 	remotectl_prepare_local  $host, $hostoption;
 	my @settings = pickout_for_targethost_from_glabal_conffiles
@@ -269,7 +278,10 @@ sub subcmd_fix_pkginfo_os ($) {
 		pickout_for_targethost_from_glabal_conffiles 
 			$host, "hostoptions";
 
-	die unless snapshot_is_present $snapshot;
+	unless( snapshot_is_present $snapshot ){
+		print STDERR "$snapshot: not found.\n";
+		return;
+	}
 
 	# 全部の symlink を取り出す
 	my %symlinks;
@@ -364,7 +376,10 @@ sub subcmd_extract_pkginfo_userdefined ($) {
 		pickout_for_targethost_from_glabal_conffiles 
 			$host, "hostoptions";
 
-	die unless snapshot_is_present $snapshot;
+	unless( snapshot_is_present $snapshot ){
+		print STDERR "$snapshot: not found.\n";
+		return;
+	}
 
 	my @rules = _parse_as_userdefined_rules
 		pickout_for_targethost_from_glabal_conffiles 
@@ -448,7 +463,10 @@ sub subcmd_extract_pkginfo_whole ($) {
 		pickout_for_targethost_from_glabal_conffiles 
 			$host, "hostoptions";
 
-	die unless snapshot_is_present $snapshot;
+	unless( snapshot_is_present $snapshot ){
+		print STDERR "$snapshot: not found.\n";
+		return;
+	}
 
 	my $pkgname2attrname2value = {};
 	my $pkgname2attrname2values = {};
@@ -491,7 +509,10 @@ sub subcmd_extract_volatiles ($) {
 		pickout_for_targethost_from_glabal_conffiles 
 			$host, "hostoptions";
 
-	die unless snapshot_is_present $snapshot;
+	unless( snapshot_is_present $snapshot ){
+		print STDERR "$snapshot: not found.\n";
+		return;
+	}
 
 	my %volatilefile;
 
@@ -544,7 +565,10 @@ sub subcmd_extract_settings ($) {
 		pickout_for_targethost_from_glabal_conffiles 
 			$host, "hostoptions";
 
-	die unless snapshot_is_present $snapshot;
+	unless( snapshot_is_present $snapshot ){
+		print STDERR "$snapshot: not found.\n";
+		return;
+	}
 
 	my %settingfile;
 
@@ -597,7 +621,10 @@ sub subcmd_extract_unmanaged ($) {
 		pickout_for_targethost_from_glabal_conffiles 
 			$host, "hostoptions";
 
-	die unless snapshot_is_present $snapshot;
+	unless( snapshot_is_present $snapshot ){
+		print STDERR "$snapshot: not found.\n";
+		return;
+	}
 
 	my %unmanagedfile;
 
@@ -664,7 +691,10 @@ sub subcmd_get_settingcontents ($) {
 		$host, "hostoptions";
 	my $hostoption = parse_as_keyvalues @hostoptions;
 
-	die unless snapshot_is_latest $snapshot;
+	unless( snapshot_is_latest $snapshot ){
+		print STDERR "$snapshot: not latest snapshot.\n";
+		return;
+	}
 
 	remotectl_prepare_local  $host, $hostoption;
 	systemordie "rsync -aSx $::STATUSDIR/$snapshot/settings.tsv $::WORKDIR/$host/conf/settings";
@@ -713,167 +743,52 @@ sub subcmd_wrapup ($) {
 	close $h;
 }
 
-sub subcmd_diff_package_versions ($$) {
-	my ($old_snapshot, $new_snapshot) = @_;
+sub subcmd_gzip ($) {
+	my ($snapshot) = @_;
 
-	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
-	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
-	die unless snapshot_is_present $old_snapshot;
-	die unless snapshot_is_present $new_snapshot;
-
-	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
-	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
-
-	die unless snapshot_is_present $old_snapshot;
-	die unless snapshot_is_present $new_snapshot;
-
-	my $old_pkgname2attrname2value;
-	my $new_pkgname2attrname2value;
-	load_pkginfo $old_snapshot, 'whole', {}, $old_pkgname2attrname2value, {};
-	load_pkginfo $new_snapshot, 'whole', {}, $new_pkgname2attrname2value, {};
-
-	my %d = _diff_package_version
-		$old_pkgname2attrname2value, $new_pkgname2attrname2value;
-	foreach my $pkgname ( sort keys %d ){
-		my $v = $d{$pkgname};
-		my $old_version = $$v[0];
-		my $new_version = $$v[1];
-		print "$pkgname	$old_version	$new_version\n";
+	unless( snapshot_is_present $snapshot ){
+		print STDERR "$snapshot: not found.\n";
+		return;
 	}
+
+	my $r = system "tar czf $::STATUSDIR/$snapshot.tar.gz -C $::STATUSDIR $snapshot";
+	if ($r == -1) {
+		print "failed to execute: $!\n";
+		return;
+	}elsif ($r & 127) {
+		printf "child died with signal %d, %s coredump\n",
+		($r & 127),  ($r & 128) ? 'with' : 'without';
+		return;
+	}elsif ($r != 0) {
+		printf "child exited with value %d\n", $r >> 8;
+		return;
+	}
+
+	my $r = system "rm -r $::STATUSDIR/$snapshot";
 }
 
-sub subcmd_diff_package_settings ($$) {
-	my ($old_snapshot, $new_snapshot) = @_;
+sub subcmd_gunzip ($) {
+	my ($snapshot) = @_;
 
-	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
-	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
-	die unless snapshot_is_present $old_snapshot;
-	die unless snapshot_is_present $new_snapshot;
-
-	my $old_path2type = {};
-	my $old_path2content = {};
-	my $new_path2type = {};
-	my $new_path2content = {};
-	load_settingcontents $old_snapshot, $old_path2type, $old_path2content;
-	load_settingcontents $new_snapshot, $new_path2type, $new_path2content;
-
-	my $old_pkgname2attrname2values = {};
-	my $new_pkgname2attrname2values = {};
-	load_pkginfo $old_snapshot, 'whole', {}, {}, $old_pkgname2attrname2values;
-	load_pkginfo $new_snapshot, 'whole', {}, {}, $new_pkgname2attrname2values;
-
-	my @pkgnames = _merge_names
-		keys(%$old_pkgname2attrname2values),
-		keys(%$new_pkgname2attrname2values);
-
-	require Text::Diff;
-
-	foreach my $pkgname ( @pkgnames ){
-		my @setting_paths = _merge_names
-			@{$$old_pkgname2attrname2values{$pkgname}->{SETTINGS}},
-			@{$$new_pkgname2attrname2values{$pkgname}->{SETTINGS}};
-
-		my @diff;
-		foreach my $setting_path ( @setting_paths ){
-			my $old_type    = $$old_path2type{$setting_path};
-			my $new_type    = $$new_path2type{$setting_path};
-			my $old_content = $$old_path2content{$setting_path};
-			my $new_content = $$new_path2content{$setting_path};
-			my @d = _diff_text $setting_path,
-				"$old_snapshot:$setting_path",
-				"$new_snapshot:$setting_path",
-				$old_type, $new_type,
-				$old_content, $new_content;
-			next unless @d;
-			push @diff, $setting_path;
-			foreach my $i ( @d ){ push @diff, "	$i"; }
-		}
-		next unless @diff;
-		print "$pkgname\n";
-		foreach my $i ( @diff ){ print "	$i\n"; }
+	unless( snapshot_is_present $snapshot ){
+		print STDERR "$snapshot: not found.\n";
+		return;
 	}
-}
 
-sub subcmd_diff_system_settings ($$) {
-	my ($old_snapshot, $new_snapshot) = @_;
-
-	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
-	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
-	die unless snapshot_is_present $old_snapshot;
-	die unless snapshot_is_present $new_snapshot;
-
-	my $old_path2type = {};
-	my $old_path2content = {};
-	my $new_path2type = {};
-	my $new_path2content = {};
-	load_settingcontents $old_snapshot, $old_path2type, $old_path2content;
-	load_settingcontents $new_snapshot, $new_path2type, $new_path2content;
-
-	my $old_path2pkgname = {};
-	my $new_path2pkgname = {};
-	my $new_pkgname2attrname2values = {};
-	load_pkginfo $old_snapshot, 'whole', $old_path2pkgname, {}, {};
-	load_pkginfo $new_snapshot, 'whole', $old_path2pkgname, {}, {};
-
-	my @package_paths = _merge_names
-		keys(%$old_path2pkgname), keys(%$new_path2pkgname);
-	my @setting_paths = _merge_names
-		keys(%$old_path2type), keys(%$new_path2type);
-
-	my %package_paths;
-	foreach my $package_path ( @package_paths ){
-		$package_paths{$package_path} = 1;
+	my $r = system "tar xzf $::STATUSDIR/$snapshot.tar.gz -C $::STATUSDIR $snapshot";
+	if ($r == -1) {
+		print "failed to execute: $!\n";
+		return;
+	}elsif ($r & 127) {
+		printf "child died with signal %d, %s coredump\n",
+		($r & 127),  ($r & 128) ? 'with' : 'without';
+		return;
+	}elsif ($r != 0) {
+		printf "child exited with value %d\n", $r >> 8;
+		return;
 	}
-	
-	require Text::Diff;
 
-	my @diff;
-	foreach my $setting_path ( @setting_paths ){
-		next if $package_paths{$setting_path};
-
-		my $old_type    = $$old_path2type{$setting_path};
-		my $new_type    = $$new_path2type{$setting_path};
-		my $old_content = $$old_path2content{$setting_path};
-		my $new_content = $$new_path2content{$setting_path};
-		my @d = _diff_text $setting_path,
-			"$old_snapshot:$setting_path",
-			"$new_snapshot:$setting_path",
-			$old_type, $new_type,
-			$old_content, $new_content;
-		next unless @d;
-		push @diff, $setting_path;
-		foreach my $i ( @d ){ push @diff, "	$i"; }
-	}
-	return unless @diff;
-	foreach my $i ( @diff ){ print "$i\n"; }
-}
-
-sub subcmd_diff ($$) {
-	my ($old_snapshot, $new_snapshot) = @_;
-
-	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
-	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
-	die unless snapshot_is_present $old_snapshot;
-	die unless snapshot_is_present $new_snapshot;
-
-	subcmd_diff_package_versions $old_snapshot, $new_snapshot;
-	#subcmd_diff_package_settings $old_snapshot, $new_snapshot;
-	subcmd_diff_system_settings  $old_snapshot, $new_snapshot;
-
-	#foreach my $path ( sort keys %r ){
-	#	my $v = $r{$path};
-	#	my $action = $$v{ACTION};
-	#	my $diff   = $$v{DIFF};
-	#	print "$path\t$action\n";
-	#	if( $diff ){
-	#		my $text = join "", @$diff;
-	#		foreach my $i ( split "\n", $text ){
-	#			print "\t\t$i\n";
-	#		}
-	#	}
-	#}
-
-	exit 0;
+	unlink "$::STATUSDIR/$snapshot.tar.gz";
 }
 
 
@@ -891,7 +806,8 @@ sub import {
 *{caller . "::subcmd_extract_unmanaged"} = \&subcmd_extract_unmanaged;
 *{caller . "::subcmd_get_settingcontents"} = \&subcmd_get_settingcontents;
 *{caller . "::subcmd_wrapup"}            = \&subcmd_wrapup;
-*{caller . "::subcmd_diff"}              = \&subcmd_diff;
+*{caller . "::subcmd_gzip"}              = \&subcmd_gzip;
+*{caller . "::subcmd_gunzip"}            = \&subcmd_gunzip;
 }
 1;
 
