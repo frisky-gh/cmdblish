@@ -217,12 +217,13 @@ sub parse_as_keyvalues (@) {
 }
 
 sub parse_as_regexplist (@) {
-	my @r;
+	my @regexps;
 	foreach my $i ( @_ ){
 		next if $i =~ m"^\s*(#|$)";
-		push @r, qr"^$i$"
+		push @regexps, $i;
 	}
-	return \@r;
+	my $regexp = '^(?:' . join('|', @regexps) . ')$';
+	return qr"$regexp";
 }
 
 

@@ -8,6 +8,7 @@ use Digest::MD5;
 
 use CMDBlish::Common;
 
+our $REGMARK;
 
 ########
 
@@ -123,26 +124,36 @@ sub _foreach_fileinfo ($&) {
 }
 
 sub _parse_as_userdefined_rules (@) {
-	my @rules;
+	my $section = "S000000";
+	my %section2pkgname_attrname;
+	my %section2regexps;
 	my $last_pkgname;
 	my $last_attrname;
 	foreach my $i ( @_ ){
 		next if $i =~ m"^\s*(#|$)";
 
 		my ($pkgname, $attrname, @values) = split m"\t", $i;
-		$last_pkgname  = $pkgname if $pkgname ne "";
-		$last_attrname = $attrname if $attrname ne "";
+		if( $pkgname ne "" ){
+			$last_pkgname = $pkgname;
+			$last_attrname = undef;
+		}
+		if( $attrname ne "" && $attrname ne $last_attrname ){
+			$last_attrname = $attrname;
+			$section++;
+			$section2pkgname_attrname{$section} =
+				[$last_pkgname, $last_attrname];
+		}
 		next unless @values;
 
 		if    ( $last_attrname eq "MODULES" ){
 			my ($re) = @values;
-			push @rules, [qr"^$re$", $last_pkgname, $last_attrname];
+			push @{ $section2regexps{$section} }, $re;
 		}elsif( $last_attrname eq "VOLATILES" ){
 			my ($re) = @values;
-			push @rules, [qr"^$re$", $last_pkgname, $last_attrname];
+			push @{ $section2regexps{$section} }, $re;
 		}elsif( $last_attrname eq "SETTINGS" ){
 			my ($re) = @values;
-			push @rules, [qr"^$re$", $last_pkgname, $last_attrname];
+			push @{ $section2regexps{$section} }, $re;
 		}elsif( $pkgname eq '' && $attrname ne '' ){
 			# 値の設定
 		}else{
@@ -150,7 +161,15 @@ sub _parse_as_userdefined_rules (@) {
 		}
 	}
 
-	return @rules;
+	my @regexps_for_each_section;
+	foreach my $section ( keys %section2regexps ){
+		my $regexps_of_section = $section2regexps{$section};
+		my $regexp_of_section = '(?:' . join('|', @$regexps_of_section) . ')$' . "(*:$section)";
+		push @regexps_for_each_section, $regexp_of_section;
+	}
+
+	my $regexp_merged_all_regexps = '^(?:' . join('|', @regexps_for_each_section) . ')';
+	return qr"$regexp_merged_all_regexps", \%section2pkgname_attrname;
 }
 
 sub _merge_names (@) {
@@ -381,7 +400,7 @@ sub subcmd_extract_pkginfo_userdefined ($) {
 		return;
 	}
 
-	my @rules = _parse_as_userdefined_rules
+	my ($regexp, $section2pkg_attr) = _parse_as_userdefined_rules
 		pickout_for_targethost_from_glabal_conffiles 
 			$host, "pkginfo_userdefined_rules";
 
@@ -394,17 +413,14 @@ sub subcmd_extract_pkginfo_userdefined ($) {
 	_foreach_fileinfo $snapshot, sub {
 		my ($perm, $uid_gid, $size, $mtime, $path, $symlink) = @_;
 		my $last_pkgname = $$path2pkgname{$path};
-		foreach my $rule ( @rules ){
-			my ($re, $pkgname, $attrname) = @$rule;
-			next unless $path =~ $re;
+		return unless $path =~ $regexp;
 
-			if( defined $last_pkgname ){
-			}else{
-				push @{$pkgname2attrname2values{$pkgname}->{$attrname}},
-	 				[$perm, $uid_gid, $size, $mtime, $path, $symlink];
-				return;
-			}
-                }
+		my $pkg_attr = $$section2pkg_attr{$REGMARK};
+		die unless $pkg_attr;
+
+		my ($pkgname, $attrname) = @$pkg_attr;
+		push @{$pkgname2attrname2values{$pkgname}->{$attrname}},
+	 		[$perm, $uid_gid, $size, $mtime, $path, $symlink];
 	};
 
 	while(my ($pkgname, $attrname2values) = each %pkgname2attrname2values){
@@ -529,7 +545,7 @@ sub subcmd_extract_volatiles ($) {
 		}
 	}
 
-	my $regexps = parse_as_regexplist
+	my $regexp = parse_as_regexplist
 		pickout_for_targethost_from_glabal_conffiles
 			$host, "volatiles";
 
@@ -540,12 +556,9 @@ sub subcmd_extract_volatiles ($) {
 		next if defined $$path2pkgname{$path};
 
 		# search for volatile ones descripted in conffile among the rest of fileinfo not described in pkginfo.
-		foreach my $regexp ( @$regexps ){
-			next unless $path =~ m/$regexp/;
+		return unless $path =~ $regexp;
 
-			$volatilefile{$path} = 'conf/volatiles';
-			last;
-		}
+		$volatilefile{$path} = 'conf/volatiles';
 	};
 
 	my $f = "$::STATUSDIR/$snapshot/volatiles.tsv";
@@ -585,7 +598,7 @@ sub subcmd_extract_settings ($) {
 		}
 	}
 
-	my $regexps = parse_as_regexplist
+	my $regexp = parse_as_regexplist
 		pickout_for_targethost_from_glabal_conffiles
 			$host, "settings";
 
@@ -596,12 +609,9 @@ sub subcmd_extract_settings ($) {
 		next if defined $$path2pkgname{$path};
 
 		# search for settings descripted in conffile among the rest of fileinfo not described in pkginfo.
-		foreach my $regexp ( @$regexps ){
-			next unless $path =~ m/$regexp/;
+		return unless $path =~ $regexp;
 
-			$settingfile{$path} = 'conf/settings';
-			last;
-		}
+		$settingfile{$path} = 'conf/settings';
 	};
 
 	my $f = "$::STATUSDIR/$snapshot/settings.tsv";
