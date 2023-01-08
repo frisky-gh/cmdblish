@@ -130,6 +130,22 @@ sub snapshot_is_latest ($) {
 	return 1;
 }
 
+sub listup_snapshots () {
+	my @r;
+	opendir my $h, "$::STATUSDIR" or do {
+		die;
+	};
+	while( my $e = readdir $h ){
+		next unless $e =~ m"^([-+.\w+]+)@([-+.\w]+)$";
+
+		my $t = read_timestamp $e, "creation";
+		next unless defined $t;
+
+		push @r, $e;
+	}
+	return @r;
+}
+
 ########
 
 sub pickout_for_targethost_from_glabal_conffile ($$) {
@@ -333,8 +349,9 @@ sub _parse_pkginfotext ($) {
 ########
 
 sub snapshot2hosttime ($) {
-	unless( $_[0] =~ m"^([-+.\w+]+)@([-+.\w]+)$" ){
-		die;
+	my ($snapshot) = @_;
+	unless( $snapshot =~ m"^([-+.\w+]+)@([-+.\w]+)$" ){
+		die "$snapshot: invalid snapshot name, stopped";
 	}
 	return $1, $2;
 }
@@ -575,6 +592,7 @@ sub import {
 *{caller . "::snapshot_is_latest"}	= \&snapshot_is_latest;
 *{caller . "::create_snapshot"}		= \&create_snapshot;
 *{caller . "::update_snapshot"}		= \&update_snapshot;
+*{caller . "::listup_snapshots"}	= \&listup_snapshots;
 *{caller . "::parse_as_keyvalues"}	= \&parse_as_keyvalues;
 *{caller . "::parse_as_regexplist"}	= \&parse_as_regexplist;
 

@@ -28,7 +28,7 @@ if( @ARGV < 1 ){
 	print "    SUBCOMMAND\n";
 	print "        diff        HOSTNAME\@TIMEID HOSTNAME\@TIMEID\n";
 	print "        crontab     HOSTNAME\@TIMEID\n";
-	print "        ssh         TIMEID HOST1 HOST2 HOST3 ...\n";
+	print "        ssh         TIMEID\n";
 	exit 1;
 }
 
@@ -45,8 +45,13 @@ if    ( $subcmd eq 'diff' ){
 	subcmd_crontab $snapshot;
 
 }elsif( $subcmd eq 'ssh' ){
-	my ($timeid, @host) = @args;
-	subcmd_ssh $timeid, @host;
+	my ($target_time) = @args;
+	my @snapshots;
+	foreach my $s ( listup_snapshots ){
+		my ($host, $time) = snapshot2hosttime $s;
+		push @snapshots, $s if $time eq $target_time;
+	}
+	subcmd_ssh @snapshots;
 
 }else{
 	die;

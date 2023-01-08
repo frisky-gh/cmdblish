@@ -317,12 +317,12 @@ sub subcmd_diff ($$) {
 sub _parse_as_crontab ($$$) {
 	my ($r, $cronuser, $content) = @_;
 	my %env;
-	my $lastcomment;
+	my $lastcomment = [];
 	foreach my $i ( @$content ){
-		if( $i =~ m"^\s*$" ){ $lastcomment = undef; next; } 
-		if( $i =~ m"^\s*#" ){ $lastcomment = $i; next; }
+		if( $i =~ m"^\s*$" ){ $lastcomment = []; next; } 
+		if( $i =~ m"^\s*#" ){ push @$lastcomment, $i; next; }
 
-		if( $i =~ m"^\s*(\w+)=(.*)$" ){ $env{$1} = $2; $lastcomment = undef; next; }
+		if( $i =~ m"^\s*(\w+)=(.*)$" ){ $env{$1} = $2; $lastcomment = []; next; }
 
 		my ($timing, $user, $cmd);
 		if( defined $cronuser ){
@@ -354,7 +354,7 @@ sub _parse_as_crontab ($$$) {
 		my $env = join " ", @env;
 		
 		push @{$$r{$user}}, [ $env, $timing, $cmd, $lastcomment ];
-		$lastcomment = undef;
+		$lastcomment = [];
 	}
 }
 
@@ -388,13 +388,13 @@ sub subcmd_crontab ($) {
 		}elsif( $path =~ m"^/etc/cron.d/(\w[-\w]+)$" ){
 			_parse_as_crontab \%crontab, undef, $$path2content{$path};
 		}elsif( $path =~ m"^/etc/cron.monthly/(\w[-\w]+)$" ){
-			push @{$crontab{'root'}}, [undef, 'monthly', $path];
+			push @{$crontab{'root'}}, [undef, 'monthly', $path, []];
 		}elsif( $path =~ m"^/etc/cron.weekly/(\w[-\w]+)$" ){
-			push @{$crontab{'root'}}, [undef, 'weekly',  $path];
+			push @{$crontab{'root'}}, [undef, 'weekly',  $path, []];
 		}elsif( $path =~ m"^/etc/cron.daily/(\w[-\w]+)$" ){
-			push @{$crontab{'root'}}, [undef, 'daily',   $path];
+			push @{$crontab{'root'}}, [undef, 'daily',   $path, []];
 		}elsif( $path =~ m"^/etc/cron.hourly/(\w[-\w]+)$" ){
-			push @{$crontab{'root'}}, [undef, 'hourly',  $path];
+			push @{$crontab{'root'}}, [undef, 'hourly',  $path, []];
 		}
 	}
 
@@ -403,11 +403,14 @@ sub subcmd_crontab ($) {
 
 		print "$user\n";
 		foreach my $i ( sort {$$a[2] cmp $$b[2]} @$crontab ){
-			my ($env, $timing, $cmd, $comment) = @$i;
+			my ($env, $timing, $cmd, $comments) = @$i;
+			my @comments = @$comments < 5 ? @$comments : splice @$comments, -5;
 			print "	$cmd\n";
 			print "		TIMING	$timing\n";
 			print "		ENV	$env\n" unless $env eq "";
-			print "		COMMENT	$comment\n" unless $comment eq "";
+			foreach my $comment ( @comments ){
+				print "		COMMENT	$comment\n";
+			}
 		}
 	}
 }
@@ -415,15 +418,16 @@ sub subcmd_crontab ($) {
 our @SSH_SYSTEMCONFIG  = ( "/etc/ssh/ssh_config" );
 our @SSHD_SYSTEMCONFIG = ( "/etc/ssh/sshd_config" );
 
-sub subcmd_ssh ($@) {
-	my ($timeid, @host) = @_;
+sub subcmd_ssh (@) {
+	my (@snapshots) = @_;
 
 	my %pubkey2userhosts;
 	my %userhost2authorizedkeys;
 
-	foreach my $host ( @host ){
-		my $snapshot = "$host\@$timeid";
-		die unless snapshot_is_present $snapshot;
+	foreach my $snapshot ( @snapshots ){
+		my ($host, $time) = snapshot2hosttime $snapshot;
+		die "$snapshot: not found, stopped"
+			unless snapshot_is_present $snapshot;
 
 		my $path2type = {};
 		my $path2content = {};
@@ -481,19 +485,22 @@ sub subcmd_ssh ($@) {
 
 		foreach my $src_userhost ( keys %src_userhost ){
 			my $options = $src_userhost{$src_userhost};
-			if( $options ){
-				my @options;
-				foreach my $k ( keys %$options ){
-					my $v = $$options{$k};
-					if( $v ne "" ){
-						push @options, $k.'="'.$v.'"';
-					}else{
-						push @options, $k;
-					}
-				}
-				$dst_userhost .= "\t" . join ",", @options;
+			unless( $options ){
+				push @{$login{$src_userhost}}, $dst_userhost;
+				next;
 			}
-			push @{$login{$src_userhost}}, $dst_userhost;
+			my @options;
+			foreach my $k ( sort keys %$options ){
+				my $v = $$options{$k};
+				if( $v ne "" ){
+					push @options, $k.'="'.$v.'"';
+				}else{
+					push @options, $k;
+				}
+			}
+			my $dst_userhost_option = $dst_userhost
+				. "\t" . join ",", @options;
+			push @{$login{$src_userhost}}, $dst_userhost_option;
 		}
 	}
 
