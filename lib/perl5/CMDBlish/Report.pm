@@ -224,7 +224,7 @@ sub subcmd_diff_package_settings ($$) {
 			my $new_type    = $$new_path2type{$setting_path};
 			my $old_content = $$old_path2content{$setting_path};
 			my $new_content = $$new_path2content{$setting_path};
-			my @d = _diff_text $setting_path,
+			my @d = diff_text $setting_path,
 				"$old_snapshot:$setting_path",
 				"$new_snapshot:$setting_path",
 				$old_type, $new_type,

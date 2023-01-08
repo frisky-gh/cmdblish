@@ -484,13 +484,14 @@ sub subcmd_extract_pkginfo_whole ($) {
 		return;
 	}
 
+	my $path2pkgname = {};
 	my $pkgname2attrname2value = {};
 	my $pkgname2attrname2values = {};
-	load_pkginfo $snapshot, 'os', {},
+	load_pkginfo $snapshot, 'os', $path2pkgname,
 		$pkgname2attrname2value, $pkgname2attrname2values;
-	load_pkginfo $snapshot, 'git', {},
+	load_pkginfo $snapshot, 'git', $path2pkgname,
 		$pkgname2attrname2value, $pkgname2attrname2values;
-	load_pkginfo $snapshot, 'userdefined', {},
+	load_pkginfo $snapshot, 'userdefined', $path2pkgname,
 		$pkgname2attrname2value, $pkgname2attrname2values;
 
 	# pkginfo_whole として統合した情報をファイル出力する
@@ -511,6 +512,7 @@ sub subcmd_extract_pkginfo_whole ($) {
 			next unless defined $values;
 			print $h "\t$attrname\n";
 			foreach my $i ( sort @$values ){
+				next unless $$path2pkgname{$i} eq $pkgname;
 				print $h "\t\t$i\n";
 			}
 		}
@@ -531,7 +533,6 @@ sub subcmd_extract_volatiles ($) {
 	}
 
 	my %volatilefile;
-
 	my $path2pkgname = {};
 	my $pkgname2attrname2values = {};
 	load_pkginfo $snapshot, 'whole',
@@ -552,10 +553,8 @@ sub subcmd_extract_volatiles ($) {
 	_foreach_fileinfo $snapshot, sub {
 		my ($perm, $uid_gid, $size, $mtime, $path, $symlink) = @_;
 
-		next if defined $volatilefile{$path};
-		next if defined $$path2pkgname{$path};
-
-		# search for volatile ones descripted in conffile among the rest of fileinfo not described in pkginfo.
+		return if defined $volatilefile{$path};
+		return if defined $$path2pkgname{$path};
 		return unless $path =~ $regexp;
 
 		$volatilefile{$path} = 'conf/volatiles';
@@ -587,14 +586,15 @@ sub subcmd_extract_settings ($) {
 
 	my $path2pkgname = {};
 	my $pkgname2attrname2values = {};
-	load_pkginfo $snapshot, 'whole',
+	load_pkginfo  $snapshot, 'whole',
 		$path2pkgname, {}, $pkgname2attrname2values;
+	load_filelist $snapshot, "volatiles", $path2pkgname;
 
 	# settings descripted in pkginfo are preffered than settings descripted in conffile.
 	while( my ($pkgname, $attrname2values) = each %$pkgname2attrname2values ){
 		next unless defined $$attrname2values{SETTINGS};
-		foreach my $s ( @{$$attrname2values{SETTINGS}} ){
-			$settingfile{$s} = $pkgname;
+		foreach my $path ( @{$$attrname2values{SETTINGS}} ){
+			$settingfile{$path} = $pkgname;
 		}
 	}
 
@@ -605,10 +605,8 @@ sub subcmd_extract_settings ($) {
 	_foreach_fileinfo $snapshot, sub {
 		my ($perm, $uid_gid, $size, $mtime, $path, $symlink) = @_;
 
-		next if defined $settingfile{$path};
-		next if defined $$path2pkgname{$path};
-
-		# search for settings descripted in conffile among the rest of fileinfo not described in pkginfo.
+		return if defined $settingfile{$path};
+		return if defined $$path2pkgname{$path};
 		return unless $path =~ $regexp;
 
 		$settingfile{$path} = 'conf/settings';
@@ -811,8 +809,8 @@ sub import {
 *{caller . "::subcmd_fix_pkginfo_os"}    = \&subcmd_fix_pkginfo_os;
 *{caller . "::subcmd_extract_pkginfo_userdefined"}  = \&subcmd_extract_pkginfo_userdefined;
 *{caller . "::subcmd_extract_pkginfo_whole"} = \&subcmd_extract_pkginfo_whole;
-*{caller . "::subcmd_extract_settings"}  = \&subcmd_extract_settings;
 *{caller . "::subcmd_extract_volatiles"} = \&subcmd_extract_volatiles;
+*{caller . "::subcmd_extract_settings"}  = \&subcmd_extract_settings;
 *{caller . "::subcmd_extract_unmanaged"} = \&subcmd_extract_unmanaged;
 *{caller . "::subcmd_get_settingcontents"} = \&subcmd_get_settingcontents;
 *{caller . "::subcmd_wrapup"}            = \&subcmd_wrapup;
