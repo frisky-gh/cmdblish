@@ -162,7 +162,7 @@ sub _parse_as_userdefined_rules (@) {
 	}
 
 	my @regexps_for_each_section;
-	foreach my $section ( keys %section2regexps ){
+	foreach my $section ( reverse sort keys %section2regexps ){
 		my $regexps_of_section = $section2regexps{$section};
 		my $regexp_of_section = '(?:' . join('|', @$regexps_of_section) . ')$' . "(*:$section)";
 		push @regexps_for_each_section, $regexp_of_section;
