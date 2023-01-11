@@ -28,6 +28,7 @@ sub _diff_package_version ($$) {
 	while( my ($k, $v) = each %d ){
 		my $old_version = $$old{$k}->{VERSION} // '-';
 		my $new_version = $$new{$k}->{VERSION} // '-';
+die if $old_version eq "-" and $new_version eq "-";
 		next if $old_version eq $new_version;
 		$r{$k} = [ $old_version, $new_version ];
 	}
@@ -174,8 +175,8 @@ sub subcmd_diff_package_versions ($$) {
 	die unless snapshot_is_present $old_snapshot;
 	die unless snapshot_is_present $new_snapshot;
 
-	my $old_pkgname2attrname2value;
-	my $new_pkgname2attrname2value;
+	my $old_pkgname2attrname2value = {};
+	my $new_pkgname2attrname2value = {};
 	load_pkginfo $old_snapshot, 'whole', {}, $old_pkgname2attrname2value, {};
 	load_pkginfo $new_snapshot, 'whole', {}, $new_pkgname2attrname2value, {};
 
