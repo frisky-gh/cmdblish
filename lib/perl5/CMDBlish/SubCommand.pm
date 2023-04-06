@@ -108,21 +108,6 @@ sub complete_trees ($$$) {
 
 ########
 
-sub _foreach_fileinfo ($&) {
-	my ($host, $sub) = @_;
-
-	my $f = "$::STATUSDIR/$host/fileinfo.tsv";
-	open my $h, "<", $f or do {
-		die "$f: cannot open, stopped";
-	};
-	while( <$h> ){
-		chomp;
-		my ($perm, $uid_gid, $size, $mtime, $path, $symlink) = split m"\t";
-		&$sub( $perm, $uid_gid, $size, $mtime, $path, $symlink );
-	}
-	close $h;
-}
-
 sub _parse_as_userdefined_rules (@) {
 	my $section = "S000000";
 	my %section2pkgname_attrname;
@@ -304,7 +289,7 @@ sub subcmd_fix_pkginfo_os ($) {
 
 	# 全部の symlink を取り出す
 	my %symlinks;
-	_foreach_fileinfo $snapshot, sub {
+	foreach_fileinfo $snapshot, sub {
 		my ($perm, $uid_gid, $size, $mtime, $path, $symlink) = @_;
 		next if $symlink eq '';
 		
@@ -410,7 +395,7 @@ sub subcmd_extract_pkginfo_userdefined ($) {
 
 	my %pkgname2attrname2values;
 	my %pkgname2attrname2value;
-	_foreach_fileinfo $snapshot, sub {
+	foreach_fileinfo $snapshot, sub {
 		my ($perm, $uid_gid, $size, $mtime, $path, $symlink) = @_;
 		my $last_pkgname = $$path2pkgname{$path};
 		return unless $path =~ $regexp;
@@ -444,6 +429,7 @@ sub subcmd_extract_pkginfo_userdefined ($) {
 		$level2_hash = '0' if $level2 eq '';
 		
 		my $version = substr($level1_hash, 0, 8) . '.' . substr($level2_hash, 0, 8);
+		$pkgname2attrname2value{$pkgname}->{DATASOURCE} = 'userdefined';
 		$pkgname2attrname2value{$pkgname}->{VERSION} = $version;
 	}
 	
@@ -550,7 +536,7 @@ sub subcmd_extract_volatiles ($) {
 		pickout_for_targethost_from_glabal_conffiles
 			$host, "volatiles";
 
-	_foreach_fileinfo $snapshot, sub {
+	foreach_fileinfo $snapshot, sub {
 		my ($perm, $uid_gid, $size, $mtime, $path, $symlink) = @_;
 
 		return if defined $volatilefile{$path};
@@ -602,7 +588,7 @@ sub subcmd_extract_settings ($) {
 		pickout_for_targethost_from_glabal_conffiles
 			$host, "settings";
 
-	_foreach_fileinfo $snapshot, sub {
+	foreach_fileinfo $snapshot, sub {
 		my ($perm, $uid_gid, $size, $mtime, $path, $symlink) = @_;
 
 		return if defined $settingfile{$path};
@@ -642,7 +628,7 @@ sub subcmd_extract_unmanaged ($) {
 	load_filelist $snapshot, "settings",     $path2pkgname;
 	load_filelist $snapshot, "volatiles",    $path2pkgname;
 
-	_foreach_fileinfo $snapshot, sub {
+	foreach_fileinfo $snapshot, sub {
 		my ($perm, $uid_gid, $size, $mtime, $path, $symlink) = @_;
 
 		my $pkgname = $$path2pkgname{$path};

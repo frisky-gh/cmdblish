@@ -165,6 +165,7 @@ foreach my $r ( @repos ){
 
 	print $h "git:$packagename\n";
 	print $h "\tVERSION	$version\n";
+	print $h "\tDATASOURCE	git\n";
 	print $h "\tOPTIONS\n";
 	print $h "\t\tGITPATH	$dir\n";
 	print $h "\t\tGITOWNER	$uid_gid\n";

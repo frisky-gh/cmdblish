@@ -17,8 +17,8 @@ sub timestamp ($) {
 sub systemordie ($) {
 	my ($cmd) = @_;
 	my $r = system $cmd;
-	my $code          = $r >> 8;
-	my $signal        = $r & 127;
+	my $code	  = $r >> 8;
+	my $signal	= $r & 127;
 	my $has_core_dump = $r & 128;
 	return if $code == 0;
 	die "cmd=$cmd, code=$code, stopped";
@@ -336,6 +336,9 @@ sub _parse_pkginfotext ($) {
 		}elsif( $last_attr eq 'MODIFIEDVCMODULES' ){
 			my ($mode, $uid_gid, $size, $mtime, $path, $link) = @value;
 			$path2attr{$path} = join(":", $last_attr, $mode, $uid_gid, $size, $mtime, $link);
+		}elsif( $last_attr eq 'DATASOURCE' ){
+			my ($datasource) = @value;
+			$pkgattrs{$last_attr} = $datasource;
 		}elsif( $last_attr eq 'VERSION' ){
 			my ($version) = @value;
 			$pkgattrs{$last_attr} = $version;
@@ -409,6 +412,21 @@ sub load_filelist ($$$) {
 	close $h;
 }
 
+sub foreach_fileinfo ($&) {
+	my ($host, $sub) = @_;
+
+	my $f = "$::STATUSDIR/$host/fileinfo.tsv";
+	open my $h, "<", $f or do {
+		die "$f: cannot open, stopped";
+	};
+	while( <$h> ){
+		chomp;
+		my ($perm, $uid_gid, $size, $mtime, $path, $symlink) = split m"\t";
+		&$sub( $perm, $uid_gid, $size, $mtime, $path, $symlink );
+	}
+	close $h;
+}
+
 ########
 
 sub load_pkginfo ($$$$$) {
@@ -445,6 +463,9 @@ sub load_pkginfo ($$$$$) {
 			my $path = $value[0];
 			push @{ $pkgname2attrname2values->{$last_pkgname}->{SETTINGS} }, $path;
 			$$path2pkgname{$path} = $last_pkgname;
+		}elsif( $last_attrname eq "DATASOURCE" ){
+			$pkgname2attrname2value->{$last_pkgname}->{DATASOURCE} = $value[0];
+			$pkgname2attrname2values->{$last_pkgname} //= {};
 		}elsif( $last_attrname eq "VERSION" ){
 			$pkgname2attrname2value->{$last_pkgname}->{VERSION} = $value[0];
 			$pkgname2attrname2values->{$last_pkgname} //= {};
@@ -604,6 +625,7 @@ sub import {
 *{caller . "::load_settingcontents"}	= \&load_settingcontents;
 *{caller . "::load_pkginfo"}		= \&load_pkginfo;
 *{caller . "::load_filelist"}		= \&load_filelist;
+*{caller . "::foreach_fileinfo"}	= \&foreach_fileinfo;
 *{caller . "::diff_text"}		= \&diff_text;
 }
 1;

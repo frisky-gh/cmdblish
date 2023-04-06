@@ -26,11 +26,26 @@ sub _diff_package_version ($$) {
 
 	my %r;
 	while( my ($k, $v) = each %d ){
-		my $old_version = $$old{$k}->{VERSION} // '-';
-		my $new_version = $$new{$k}->{VERSION} // '-';
+		my $old_version    = $$old{$k}->{VERSION}    // '-';
+		my $old_datasource = $$old{$k}->{DATASOURCE} // '-';
+		my $new_version    = $$new{$k}->{VERSION}    // '-';
+		my $new_datasource = $$new{$k}->{DATASOURCE} // '-';
 die if $old_version eq "-" and $new_version eq "-";
 		next if $old_version eq $new_version;
-		$r{$k} = [ $old_version, $new_version ];
+
+		my $status = join " ",
+			$old_version, $old_datasource,
+			$new_version, $new_datasource;
+		my $type = "userdefined";
+
+		if    ( $status =~ m"^.* (dpkg|rpm) .* (dpkg|rpm)$" ){
+			$type = "os";
+		}elsif( $status =~ m"^.* (dpkg|rpm) - -$" ){
+			$type = "os";
+		}elsif( $status =~ m"^- - .* (dpkg|rpm)$" ){
+			$type = "os";
+		}
+		$r{$k} = [ $type, $old_version, $new_version ];
 	}
 	return %r;
 }
@@ -40,18 +55,56 @@ sub _diff_path ($$) {
 	my %r;
 	while( my ($k, $v) = each %$old ){ $r{$k} += 1; }
 	while( my ($k, $v) = each %$new ){ $r{$k} += 2; }
+	return %r;
 
-	my @remove;
-	my @add;
-	my @comm;
-	foreach my $k ( sort keys %r ){
-		my $v = $r{$k};
-		if   ( $v == 1 ){ push @remove, $k; }
-		elsif( $v == 2 ){ push @add,    $k; }
-		elsif( $v == 3 ){ push @comm,   $k; }
-		else{ die; }
+#	my @remove;
+#	my @add;
+#	my @comm;
+#	foreach my $k ( sort keys %r ){
+#		my $v = $r{$k};
+#		if   ( $v == 1 ){ push @remove, $k; }
+#		elsif( $v == 2 ){ push @add,    $k; }
+#		elsif( $v == 3 ){ push @comm,   $k; }
+#		else{ die; }
+#	}
+#	return \@remove, \@add, \@comm;
+}
+
+sub _diff_fileinfo ($$$$) {
+	my ( $old_filelist, $old_fileinfo, $new_filelist, $new_fileinfo ) = @_;
+
+	my %d;
+	foreach my $i ( @$old_filelist ){ $d{$i} += 1; }
+	foreach my $i ( @$new_filelist ){ $d{$i} += 2; }
+
+	my @name = (
+		'MODIFIED_PERMISSION', 'MODIFIED_UID_GID', 'MODIFIED_SIZE',
+		'MODIFIED_TIMESTAMP', undef, 'MODIFIED_SYMLINK'
+	);
+	my @r;
+	foreach my $i ( sort keys %d ){
+		my $d = $d{$i};
+		if( $d == 1 ){
+			push @r, $$old_fileinfo{$i}->[4] . "\tREMOVED";
+			next;
+		}
+		if( $d == 2 ){
+			push @r, $$new_fileinfo{$i}->[4] . "\tADDED";
+			next;
+		}
+
+		my $old = $$old_fileinfo{$i};
+		my $new = $$new_fileinfo{$i};
+		my @d;
+		for( my $j = 0; $j < 6; ++$j ){
+			next if $$old[$j] eq $$new[$j];
+			push @d, $name[$j] . "(" . $$old[$j] . "=>" . $$new[$j] . ")";
+		}
+		next unless @d;
+
+		push @r, $i . "\t" . join ",", @d;
 	}
-	return \@remove, \@add, \@comm;
+	return @r;
 }
 
 ########
@@ -161,17 +214,11 @@ sub _canonical ($$$) {
 
 ########
 
-sub subcmd_diff_package_versions ($$) {
+sub subcmd_diff_os_package_versions ($$) {
 	my ($old_snapshot, $new_snapshot) = @_;
 
 	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
 	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
-	die unless snapshot_is_present $old_snapshot;
-	die unless snapshot_is_present $new_snapshot;
-
-	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
-	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
-
 	die unless snapshot_is_present $old_snapshot;
 	die unless snapshot_is_present $new_snapshot;
 
@@ -183,10 +230,83 @@ sub subcmd_diff_package_versions ($$) {
 	my %d = _diff_package_version
 		$old_pkgname2attrname2value, $new_pkgname2attrname2value;
 	foreach my $pkgname ( sort keys %d ){
-		my $v = $d{$pkgname};
-		my $old_version = $$v[0];
-		my $new_version = $$v[1];
+		my ($type, $old_version, $new_version) = @{$d{$pkgname}};
+		next unless $type eq "os";
 		print "$pkgname	$old_version	$new_version\n";
+	}
+}
+
+sub subcmd_diff_userdefined_packages ($$) {
+	my ($old_snapshot, $new_snapshot) = @_;
+
+	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
+	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
+	die unless snapshot_is_present $old_snapshot;
+	die unless snapshot_is_present $new_snapshot;
+
+	my $old_pkgname2attrname2value  = {};
+	my $old_pkgname2attrname2values = {};
+	my $new_pkgname2attrname2value  = {};
+	my $new_pkgname2attrname2values = {};
+	load_pkginfo $old_snapshot, 'whole', {},
+		$old_pkgname2attrname2value, $old_pkgname2attrname2values;
+	load_pkginfo $new_snapshot, 'whole', {},
+		$new_pkgname2attrname2value, $new_pkgname2attrname2values;
+
+	my %old_fileinfo;
+	my %new_fileinfo;
+	my %d1 = _diff_package_version
+		$old_pkgname2attrname2value, $new_pkgname2attrname2value;
+	my %d2;
+	foreach my $pkgname ( sort keys %d1 ){
+		my ($type, $old_version, $new_version) = @{$d1{$pkgname}};
+		next unless $type eq "userdefined";
+
+		my $old_modules = $$old_pkgname2attrname2values{$pkgname}
+			->{MODULES} // [];
+		my $new_modules = $$new_pkgname2attrname2values{$pkgname}
+			->{MODULES} // [];
+		foreach my $f ( @$old_modules ){
+			$old_fileinfo{$f} = 'required';
+		}
+		foreach my $f ( @$new_modules ){
+			$new_fileinfo{$f} = 'required';
+		}
+		$d2{$pkgname} = [ $old_modules, $new_modules ];
+	}
+
+	foreach_fileinfo $old_snapshot, sub {
+		my ($perm, $uid_gid, $size, $mtime, $path, $symlink) = @_;
+		return unless defined $old_fileinfo{$path};
+		$old_fileinfo{$path} = [@_];
+	};
+	foreach_fileinfo $new_snapshot, sub {
+		my ($perm, $uid_gid, $size, $mtime, $path, $symlink) = @_;
+		return unless defined $new_fileinfo{$path};
+		$new_fileinfo{$path} = [@_];
+	};
+
+	while( my ($k, $v) = each %old_fileinfo ){
+		if($v eq 'required'){
+			print STDERR "DEBUG: $k: not found in old fileinfo.\n";
+		}
+	}
+	while( my ($k, $v) = each %new_fileinfo ){
+		if($v eq 'required'){
+			print STDERR "DEBUG: $k: not found in new fileinfo.\n";
+		}
+	}
+
+	foreach my $pkgname ( sort keys %d2 ){
+		my ($old_modules, $new_modules) = @{$d2{$pkgname}};
+		my @diff = _diff_fileinfo
+			$old_modules, \%old_fileinfo,
+			$new_modules, \%new_fileinfo;
+
+		print "$pkgname\n";
+		foreach my $i ( @diff ){
+			print "	$i\n";
+		}
 	}
 }
 
@@ -231,6 +351,7 @@ sub subcmd_diff_package_settings ($$) {
 				$old_type, $new_type,
 				$old_content, $new_content;
 			next unless @d;
+			shift @d; shift @d;
 			push @diff, $setting_path;
 			foreach my $i ( @d ){ push @diff, "	$i"; }
 		}
@@ -287,11 +408,32 @@ sub subcmd_diff_system_settings ($$) {
 			$old_type, $new_type,
 			$old_content, $new_content;
 		next unless @d;
+		shift @d; shift @d;
 		push @diff, $setting_path;
 		foreach my $i ( @d ){ push @diff, "	$i"; }
 	}
 	return unless @diff;
 	foreach my $i ( @diff ){ print "$i\n"; }
+}
+
+sub subcmd_diff_unmanaged ($$) {
+	my ($old_snapshot, $new_snapshot) = @_;
+
+	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
+	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
+	die unless snapshot_is_present $old_snapshot;
+	die unless snapshot_is_present $new_snapshot;
+
+	my $old_path2listname = {};
+	my $new_path2listname = {};
+	load_filelist $old_snapshot, "unmanaged", $old_path2listname;
+	load_filelist $new_snapshot, "unmanaged", $new_path2listname;
+	my %r = _diff_path $old_path2listname, $new_path2listname;
+	foreach my $f ( sort keys %r ){
+		my $v = $r{$f};
+		if   ( $v == 1 ){ print "-$f\n"; }
+		elsif( $v == 2 ){ print "+$f\n"; }
+	}
 }
 
 sub subcmd_diff ($$) {
@@ -302,14 +444,20 @@ sub subcmd_diff ($$) {
 	die unless snapshot_is_present $old_snapshot;
 	die unless snapshot_is_present $new_snapshot;
 
-	print "[package_versions]\n";
-	subcmd_diff_package_versions $old_snapshot, $new_snapshot;
+	print "[os_package_versions]\n";
+	subcmd_diff_os_package_versions  $old_snapshot, $new_snapshot;
+	print "\n";
+	print "[userdefined_packages]\n";
+	subcmd_diff_userdefined_packages $old_snapshot, $new_snapshot;
 	print "\n";
 	print "[package_settings]\n";
-	subcmd_diff_package_settings $old_snapshot, $new_snapshot;
+	subcmd_diff_package_settings     $old_snapshot, $new_snapshot;
 	print "\n";
 	print "[system_settings]\n";
-	subcmd_diff_system_settings  $old_snapshot, $new_snapshot;
+	subcmd_diff_system_settings      $old_snapshot, $new_snapshot;
+	print "\n";
+	print "[unmanaged]\n";
+	subcmd_diff_unmanaged            $old_snapshot, $new_snapshot;
 	print "\n";
 
 	exit 0;

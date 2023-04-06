@@ -104,6 +104,7 @@ foreach my $package ( sort keys %packages ){
 	my $version       = $package2info{$package}->{Version} . '-' . $package2info{$package}->{Release};
 	my $systemmodules = $package2systemmodules{$package};
 	print $h "rpm:$package\n";
+	print $h "\tDATASOURCE	rpm\n";
 	if( $version ne '-' ){
 		print $h "\tVERSION	$version\n";
 	}

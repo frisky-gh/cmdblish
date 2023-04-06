@@ -104,6 +104,7 @@ foreach my $package ( sort keys %packages ){
 	my $systemmodules  = $package2systemmodules{$package};
 	my $systemsettings = $package2systemsettings{$package};
 	print $h "deb:$package\n";
+	print $h "\tDATASOURCE	dpkg\n";
 	if( $version ){
 		print $h "\tVERSION	$version\n";
 	}
