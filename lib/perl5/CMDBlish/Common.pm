@@ -21,6 +21,7 @@ sub systemordie ($) {
 	my $signal	= $r & 127;
 	my $has_core_dump = $r & 128;
 	return if $code == 0;
+	die "cmd=$cmd, reason=$!, stopped" if $r < 0;
 	die "cmd=$cmd, code=$code, stopped";
 }
 
