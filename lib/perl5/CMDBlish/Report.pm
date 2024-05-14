@@ -30,7 +30,7 @@ sub _diff_package_version ($$) {
 		my $old_datasource = $$old{$k}->{DATASOURCE} // '-';
 		my $new_version    = $$new{$k}->{VERSION}    // '-';
 		my $new_datasource = $$new{$k}->{DATASOURCE} // '-';
-die if $old_version eq "-" and $new_version eq "-";
+die "$k, $old_version, $new_version, stopped" if $old_version eq "-" and $new_version eq "-";
 		next if $old_version eq $new_version;
 
 		my $status = join " ",
@@ -441,8 +441,8 @@ sub subcmd_diff ($$) {
 
 	my ($old_host, $old_time) = snapshot2hosttime $old_snapshot;
 	my ($new_host, $new_time) = snapshot2hosttime $new_snapshot;
-	die unless snapshot_is_present $old_snapshot;
-	die unless snapshot_is_present $new_snapshot;
+	die "$old_snapshot: not found, stopped" unless snapshot_is_present $old_snapshot;
+	die "$new_snapshot: not found, stopped" unless snapshot_is_present $new_snapshot;
 
 	print "[os_package_versions]\n";
 	subcmd_diff_os_package_versions  $old_snapshot, $new_snapshot;

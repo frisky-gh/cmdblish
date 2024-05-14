@@ -31,6 +31,7 @@ if( @ARGV < 1 ){
 	print "        get_pkginfo_git     HOSTNAME\@TIMEID\n";
 	print "        fix_pkginfo_os      HOSTNAME\@TIMEID\n";
 	print "        extract_pkginfo_userdefined HOSTNAME\@TIMEID\n";
+	print "        extract_pkginfo_whole HOSTNAME\@TIMEID\n";
 	print "        extract_volatiles   HOSTNAME\@TIMEID\n";
 	print "        extract_settings    HOSTNAME\@TIMEID\n";
 	print "        extract_unmanaged   HOSTNAME\@TIMEID\n";

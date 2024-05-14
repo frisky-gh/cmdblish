@@ -287,10 +287,14 @@ sub subcmd_fix_pkginfo_os ($) {
 		return;
 	}
 
+	# 全部のファイル名を取り出す
 	# 全部の symlink を取り出す
+	my %filepaths;
 	my %symlinks;
 	foreach_fileinfo $snapshot, sub {
 		my ($perm, $uid_gid, $size, $mtime, $path, $symlink) = @_;
+		$filepaths{$path} = 1;
+
 		next if $symlink eq '';
 		
 		$symlinks{$path} = $symlink;
@@ -365,9 +369,20 @@ sub subcmd_fix_pkginfo_os ($) {
 			my $values = $$attrname2values{$attrname};
 			next unless defined $values;
 			print $h "\t$attrname\n";
-			foreach my $i ( sort @$values ){
-				print $h "\t\t$i\n";
+			if( $attrname eq 'MODULES' || $attrname eq 'SETTINGS' ||  $attrname eq 'VOLATILES' ){
+				foreach my $i ( sort @$values ){
+					if( $filepaths{$i} ){
+						print $h "\t\t$i\n";
+					}else{
+						print "Warning: $pkgname: $i: not found.\n";
+					}
+				}
+			}else{
+				foreach my $i ( sort @$values ){
+					print $h "\t\t$i\n";
+				}
 			}
+
 		}
 	}
 	close $h;

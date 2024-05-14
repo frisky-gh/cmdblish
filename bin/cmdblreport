@@ -54,7 +54,7 @@ if    ( $subcmd eq 'diff' ){
 	subcmd_ssh @snapshots;
 
 }else{
-	die;
+	die "$subcmd: unknown subcommand, stopped";
 }
 
 exit 0;
