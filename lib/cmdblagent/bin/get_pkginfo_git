@@ -116,18 +116,18 @@ open my $h, ">", $f or do {
 foreach my $r ( @repos ){
 	my ($path, $uid_gid) = @$r;
 	my $dir = $path . ( $path =~ m"/$" ? '' : '/' );
-	my $url = `cd \Q$path\E ; git config remote.origin.url`;
+	my $url = `git --git-dir=\Q$path/.git\E --work-tree=\Q$path\E config remote.origin.url`;
 	chomp $url;
 	$url =~ s{^(https?://).*@(.*)$}{$1$2};
 	my $packagename = $url eq '' ? $path : $path . ":" . $url;
 
-	my $commitid_message = `cd \Q$path\E ; git log -n 1 --oneline`;
+	my $commitid_message = `git --git-dir=\Q$path/.git\E --work-tree=\Q$path\E log -n 1 --oneline`;
 	next unless $commitid_message =~ m"^(\S+) (.*)$";
 	my $commitid = $1;
 	my $commitmessage = $2;
 
 	my @vcmodules;
-	open my $i, '-|', "cd \Q$path\E ; git ls-tree -r --full-tree --name-status HEAD" or do {
+	open my $i, '-|', "git --git-dir=\Q$path/.git\E --work-tree=\Q$path\E ls-tree -r --full-tree --name-status HEAD" or do {
 		die "git status: cannot open, stopped";
 	};
 	while( <$i> ){
@@ -136,7 +136,7 @@ foreach my $r ( @repos ){
 	}
 	close $i;
 	my %modified;
-	open my $i, '-|', "cd \Q$path\E ; git status --porcelain" or do {
+	open my $i, '-|', "git --git-dir=\Q$path/.git\E --work-tree=\Q$path\E status --porcelain" or do {
 		die "git status: cannot open, stopped";
 	};
 	while( <$i> ){
